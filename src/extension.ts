@@ -48,6 +48,20 @@ type WebviewMessage =
       values?: Record<string, unknown>;
     }
   | {
+      type: "insertTableRow";
+      tableName?: string;
+      page?: number;
+      search?: string;
+      values?: Record<string, unknown>;
+    }
+  | {
+      type: "deleteTableRow";
+      tableName?: string;
+      page?: number;
+      search?: string;
+      rowKey?: Record<string, unknown>;
+    }
+  | {
       type: "applyTableSchema";
       tableName?: string;
       search?: string;
@@ -610,6 +624,50 @@ async function configureWebview(
         );
         webview.postMessage({
           type: "rowUpdated",
+          payload
+        });
+        await sqlHelperExplorerProvider?.refresh();
+        await refreshDiagnosticsForOpenSqlDocuments(context);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        webview.postMessage({ type: "tableDataError", payload: text });
+      }
+      return;
+    }
+
+    if (message.type === "insertTableRow") {
+      try {
+        const payload = await insertActiveTableRow(
+          context,
+          message.tableName,
+          message.page ?? 0,
+          message.search ?? "",
+          message.values ?? {}
+        );
+        webview.postMessage({
+          type: "rowInserted",
+          payload
+        });
+        await sqlHelperExplorerProvider?.refresh();
+        await refreshDiagnosticsForOpenSqlDocuments(context);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        webview.postMessage({ type: "tableDataError", payload: text });
+      }
+      return;
+    }
+
+    if (message.type === "deleteTableRow") {
+      try {
+        const payload = await deleteActiveTableRow(
+          context,
+          message.tableName,
+          message.page ?? 0,
+          message.search ?? "",
+          message.rowKey ?? {}
+        );
+        webview.postMessage({
+          type: "rowDeleted",
           payload
         });
         await sqlHelperExplorerProvider?.refresh();
@@ -1227,6 +1285,91 @@ async function updateActiveTableRow(
   );
   invalidateSchemaCache(schema.path);
   return loadActiveTableData(context, table.name, requestedPage, search);
+}
+
+async function insertActiveTableRow(
+  context: vscode.ExtensionContext,
+  requestedTableName: string | undefined,
+  requestedPage: number,
+  search: string,
+  values: Record<string, unknown>
+): Promise<TableDataPayload> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    throw new Error("No active SQLite database selected.");
+  }
+
+  const table = resolveRequestedTable(schema, requestedTableName);
+  const providedEntries = Object.entries(values).filter(([, value]) => value !== undefined);
+  const allowedColumns = new Set(table.columns.map((column) => column.name));
+  const insertEntries = providedEntries.filter(([columnName]) => allowedColumns.has(columnName));
+
+  if (insertEntries.length === 0) {
+    await runSqliteStatement(
+      schema.path,
+      `INSERT INTO ${quoteSqliteIdentifier(table.name)} DEFAULT VALUES;`
+    );
+  } else {
+    const columnSql = insertEntries.map(([columnName]) => quoteSqliteIdentifier(columnName)).join(", ");
+    const valueSql = insertEntries.map(([, value]) => toSqliteValue(value)).join(", ");
+    await runSqliteStatement(
+      schema.path,
+      `INSERT INTO ${quoteSqliteIdentifier(table.name)} (${columnSql}) VALUES (${valueSql});`
+    );
+  }
+
+  invalidateSchemaCache(schema.path);
+  return loadActiveTableData(context, table.name, requestedPage, search);
+}
+
+async function deleteActiveTableRow(
+  context: vscode.ExtensionContext,
+  requestedTableName: string | undefined,
+  requestedPage: number,
+  search: string,
+  rowKey: Record<string, unknown>
+): Promise<TableDataPayload> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    throw new Error("No active SQLite database selected.");
+  }
+
+  const table = resolveRequestedTable(schema, requestedTableName);
+  const rowKeyEntries = Object.entries(rowKey);
+
+  if (rowKeyEntries.length === 0) {
+    throw new Error("Missing row identity for delete.");
+  }
+
+  const whereClause = rowKeyEntries
+    .map(([columnName, value]) => {
+      if (value === null || value === undefined) {
+        return columnName === "__sqlhelper_rowid__"
+          ? `"rowid" IS NULL`
+          : `${quoteSqliteIdentifier(columnName)} IS NULL`;
+      }
+
+      return columnName === "__sqlhelper_rowid__"
+        ? `"rowid" = ${toSqliteValue(value)}`
+        : `${quoteSqliteIdentifier(columnName)} = ${toSqliteValue(value)}`;
+    })
+    .join(" AND ");
+
+  await runSqliteStatement(
+    schema.path,
+    `DELETE FROM ${quoteSqliteIdentifier(table.name)} WHERE ${whereClause};`
+  );
+
+  invalidateSchemaCache(schema.path);
+  const nextPayload = await loadActiveTableData(context, table.name, requestedPage, search);
+
+  if (requestedPage > 0 && nextPayload.rows.length === 0) {
+    return loadActiveTableData(context, table.name, requestedPage - 1, search);
+  }
+
+  return nextPayload;
 }
 
 async function applyActiveTableSchema(
