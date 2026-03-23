@@ -74,6 +74,9 @@ const ACTIVE_PROFILE_KEY = "sqlHelper.activeProfileId";
 const SQLITE_EXTENSIONS = new Set([".sqlite", ".sqlite3", ".db", ".db3"]);
 const SCHEMA_SCHEME = "sql-helper-schema";
 const PREVIEW_SCHEME = "sql-helper-preview";
+const QUERY_SCHEME = "sql-helper-query";
+const DIAGNOSTIC_TABLE_CODE = "sqlHelper.missingTable";
+const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
 
@@ -82,11 +85,13 @@ export function activate(context: vscode.ExtensionContext): void {
   sqlHelperDiagnostics = diagnostics;
   const schemaProvider = new MemoryDocumentProvider();
   const previewProvider = new MemoryDocumentProvider();
+  const queryProvider = new MemoryDocumentProvider();
 
   context.subscriptions.push(
     diagnostics,
     vscode.workspace.registerTextDocumentContentProvider(SCHEMA_SCHEME, schemaProvider),
     vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, previewProvider),
+    vscode.workspace.registerTextDocumentContentProvider(QUERY_SCHEME, queryProvider),
     vscode.commands.registerCommand("sqlHelper.openAnalyzer", async () => {
       const panel = vscode.window.createWebviewPanel("sqlHelperAnalyzer", "SQL Helper", vscode.ViewColumn.One, {
         enableScripts: true,
@@ -97,6 +102,12 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
       await previewTable(context, previewProvider, tableName);
+    }),
+    vscode.commands.registerCommand("sqlHelper.previewQuery", async () => {
+      await previewQuery(context, queryProvider);
+    }),
+    vscode.commands.registerCommand("sqlHelper.explainQuery", async () => {
+      await explainQuery(context, queryProvider);
     }),
     vscode.window.registerCustomEditorProvider(
       "sqlHelper.sqliteViewer",
@@ -117,6 +128,17 @@ export function activate(context: vscode.ExtensionContext): void {
       { language: "sql" },
       createDefinitionProvider(context, schemaProvider)
     ),
+    vscode.languages.registerReferenceProvider({ language: "sql" }, createReferenceProvider()),
+    vscode.languages.registerDocumentHighlightProvider(
+      { language: "sql" },
+      createDocumentHighlightProvider()
+    ),
+    vscode.languages.registerCodeActionsProvider(
+      { language: "sql" },
+      createCodeActionsProvider(context),
+      { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] }
+    ),
+    vscode.languages.registerRenameProvider({ language: "sql" }, createRenameProvider(context)),
     vscode.workspace.onDidOpenTextDocument((document) => {
       void refreshDiagnosticsForDocument(context, diagnostics, document);
     }),
@@ -568,6 +590,142 @@ function createDefinitionProvider(
   };
 }
 
+function createCodeActionsProvider(context: vscode.ExtensionContext): vscode.CodeActionProvider {
+  return {
+    async provideCodeActions(document, range, actionContext) {
+      const schema = await getActiveSqliteSchema(context);
+
+      if (!schema) {
+        return [];
+      }
+
+      const actions: vscode.CodeAction[] = [];
+
+      for (const diagnostic of actionContext.diagnostics) {
+        if (!diagnostic.range.intersection(range)) {
+          continue;
+        }
+
+        if (diagnostic.code === DIAGNOSTIC_TABLE_CODE) {
+          const diagnosticData = diagnostic as vscode.Diagnostic & { data?: { name?: string } };
+          const original = typeof diagnosticData.data === "object" && diagnosticData.data && "name" in diagnosticData.data
+            ? String(diagnosticData.data.name)
+            : "";
+          for (const suggestion of findClosestNames(original, schema.tables.map((table) => table.name))) {
+            actions.push(createReplacementCodeAction(document, diagnostic, suggestion, `Replace with table "${suggestion}"`));
+          }
+        }
+
+        if (diagnostic.code === DIAGNOSTIC_COLUMN_CODE) {
+          const data = (diagnostic as vscode.Diagnostic & {
+            data?: { tableName?: string; columnName?: string };
+          }).data;
+          const table = schema.tables.find((entry) => entry.name === data?.tableName);
+
+          if (!table) {
+            continue;
+          }
+
+          for (const suggestion of findClosestNames(data?.columnName ?? "", table.columns.map((column) => column.name))) {
+            actions.push(createReplacementCodeAction(document, diagnostic, suggestion, `Replace with column "${suggestion}"`));
+          }
+        }
+      }
+
+      const batchActions = createBatchCodeActions(document, actionContext.diagnostics, schema);
+      actions.push(...batchActions);
+
+      return actions;
+    }
+  };
+}
+
+function createReferenceProvider(): vscode.ReferenceProvider {
+  return {
+    provideReferences(document, position) {
+      const parsed = parseSql(document.getText());
+      const symbol = resolveSymbolAtPosition(document, parsed, position);
+
+      if (!symbol) {
+        return [];
+      }
+
+      return findSymbolOccurrences(document, parsed, symbol).map(
+        (range) => new vscode.Location(document.uri, range)
+      );
+    }
+  };
+}
+
+function createDocumentHighlightProvider(): vscode.DocumentHighlightProvider {
+  return {
+    provideDocumentHighlights(document, position) {
+      const parsed = parseSql(document.getText());
+      const symbol = resolveSymbolAtPosition(document, parsed, position);
+
+      if (!symbol) {
+        return [];
+      }
+
+      return findSymbolOccurrences(document, parsed, symbol).map(
+        (range) => new vscode.DocumentHighlight(range, vscode.DocumentHighlightKind.Read)
+      );
+    }
+  };
+}
+
+function createRenameProvider(context: vscode.ExtensionContext): vscode.RenameProvider {
+  return {
+    async prepareRename(document, position) {
+      const schema = await getActiveSqliteSchema(context);
+
+      if (!schema) {
+        throw new Error("No active SQLite database selected.");
+      }
+
+      const parsed = parseSql(document.getText());
+      const token = findTokenAtOffset(parsed, document.offsetAt(position));
+
+      if (!token) {
+        throw new Error("Place the cursor on a table or a qualified column.");
+      }
+
+      if (token.type === "table") {
+        return createRangeFromOffsets(document, token.reference.range);
+      }
+
+      return createRangeFromOffsets(document, token.reference.columnRange);
+    },
+    async provideRenameEdits(document, position, newName) {
+      const schema = await getActiveSqliteSchema(context);
+
+      if (!schema) {
+        throw new Error("No active SQLite database selected.");
+      }
+
+      if (!/^[a-z_][a-z0-9_]*$/i.test(newName)) {
+        throw new Error("Use a valid SQL identifier.");
+      }
+
+      const text = document.getText();
+      const parsed = parseSql(text);
+      const symbol = resolveSymbolAtPosition(document, parsed, position);
+
+      if (!symbol) {
+        throw new Error("Place the cursor on a table or a qualified column.");
+      }
+
+      const edit = new vscode.WorkspaceEdit();
+
+      for (const range of findSymbolOccurrences(document, parsed, symbol)) {
+        edit.replace(document.uri, range, newName);
+      }
+
+      return edit;
+    }
+  };
+}
+
 async function provideSqlCompletions(
   context: vscode.ExtensionContext,
   document: vscode.TextDocument,
@@ -657,9 +815,59 @@ async function previewTable(
     `SELECT * FROM ${quoteSqliteIdentifier(tableName)} LIMIT 20;`
   );
   const uri = vscode.Uri.parse(
-    `${PREVIEW_SCHEME}:/${encodeURIComponent(tableName)}.json?db=${encodeURIComponent(schema.path)}`
+    `${PREVIEW_SCHEME}:/${encodeURIComponent(tableName)}.md?db=${encodeURIComponent(schema.path)}`
   );
-  provider.set(uri, JSON.stringify(rows, null, 2));
+  provider.set(uri, renderQueryResultDocument(`Preview: ${tableName}`, schema.path, `SELECT * FROM ${tableName} LIMIT 20;`, rows));
+
+  const document = await vscode.workspace.openTextDocument(uri);
+  await vscode.window.showTextDocument(document, {
+    preview: false,
+    viewColumn: vscode.ViewColumn.Beside
+  });
+}
+
+async function previewQuery(context: vscode.ExtensionContext, provider: MemoryDocumentProvider): Promise<void> {
+  await runQueryCommand(context, provider, false);
+}
+
+async function explainQuery(context: vscode.ExtensionContext, provider: MemoryDocumentProvider): Promise<void> {
+  await runQueryCommand(context, provider, true);
+}
+
+async function runQueryCommand(
+  context: vscode.ExtensionContext,
+  provider: MemoryDocumentProvider,
+  explain: boolean
+): Promise<void> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    void vscode.window.showWarningMessage("No active SQLite database selected.");
+    return;
+  }
+
+  const editor = vscode.window.activeTextEditor;
+
+  if (!editor || editor.document.languageId !== "sql") {
+    void vscode.window.showWarningMessage("Open a SQL document first.");
+    return;
+  }
+
+  const selectedText = editor.document.getText(editor.selection).trim();
+  const sql = selectedText || editor.document.getText().trim();
+
+  if (!sql) {
+    void vscode.window.showWarningMessage("No SQL text available.");
+    return;
+  }
+
+  const commandSql = explain ? `EXPLAIN QUERY PLAN ${sql}` : sql;
+  const rows = await runSqliteJson<Record<string, unknown>>(schema.path, commandSql);
+  const label = explain ? "explain" : "preview";
+  const uri = vscode.Uri.parse(
+    `${QUERY_SCHEME}:/${label}-${Date.now()}.md?db=${encodeURIComponent(schema.path)}`
+  );
+  provider.set(uri, renderQueryResultDocument(explain ? "Explain Query Plan" : "Query Preview", schema.path, sql, rows));
 
   const document = await vscode.workspace.openTextDocument(uri);
   await vscode.window.showTextDocument(document, {
@@ -706,6 +914,10 @@ async function refreshDiagnosticsForDocument(
   const items: vscode.Diagnostic[] = [];
 
   for (const reference of parsed.tableReferences) {
+    if (reference.isCte || parsed.cteNames.includes(reference.tableName)) {
+      continue;
+    }
+
     const resolvedName = reference.tableName.toLowerCase();
 
     if (tableMap.has(resolvedName)) {
@@ -713,10 +925,14 @@ async function refreshDiagnosticsForDocument(
     }
 
     items.push(
-      new vscode.Diagnostic(
+      withDiagnosticData(
+        new vscode.Diagnostic(
         createRangeFromOffsets(document, reference.range),
         `Table "${reference.tableName}" does not exist in the active SQLite database.`,
         vscode.DiagnosticSeverity.Error
+        ),
+        DIAGNOSTIC_TABLE_CODE,
+        { name: reference.tableName }
       )
     );
   }
@@ -738,10 +954,17 @@ async function refreshDiagnosticsForDocument(
       continue;
     }
 
-    const diagnostic = new vscode.Diagnostic(
-      createRangeFromOffsets(document, columnReference.columnRange),
-      `Column "${columnReference.columnName}" does not exist on table "${table.name}".`,
-      vscode.DiagnosticSeverity.Warning
+    const diagnostic = withDiagnosticData(
+      new vscode.Diagnostic(
+        createRangeFromOffsets(document, columnReference.columnRange),
+        `Column "${columnReference.columnName}" does not exist on table "${table.name}".`,
+        vscode.DiagnosticSeverity.Warning
+      ),
+      DIAGNOSTIC_COLUMN_CODE,
+      {
+        tableName: table.name,
+        columnName: columnReference.columnName
+      }
     );
     diagnostic.relatedInformation = [
       new vscode.DiagnosticRelatedInformation(
@@ -793,4 +1016,286 @@ function buildSchemaDocument(schema: SqliteSchema): SchemaDocument {
 
 function createRangeFromOffsets(document: vscode.TextDocument, range: { start: number; end: number }): vscode.Range {
   return new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
+}
+
+function resolveSymbolAtPosition(
+  document: vscode.TextDocument,
+  parsed: ParsedSql,
+  position: vscode.Position
+):
+  | { type: "table"; tableName: string }
+  | { type: "column"; tableName: string; columnName: string }
+  | null {
+  const token = findTokenAtOffset(parsed, document.offsetAt(position));
+
+  if (!token) {
+    return null;
+  }
+
+  if (token.type === "table") {
+    return {
+      type: "table",
+      tableName: token.reference.tableName.toLowerCase()
+    };
+  }
+
+  const aliases = buildAliasMap(parsed);
+  const tableName =
+    aliases.get(token.reference.qualifier.toLowerCase()) ?? token.reference.qualifier.toLowerCase();
+
+  return {
+    type: "column",
+    tableName,
+    columnName: token.reference.columnName.toLowerCase()
+  };
+}
+
+function findSymbolOccurrences(
+  document: vscode.TextDocument,
+  parsed: ParsedSql,
+  symbol:
+    | { type: "table"; tableName: string }
+    | { type: "column"; tableName: string; columnName: string }
+): vscode.Range[] {
+  if (symbol.type === "table") {
+    const ranges = parsed.tableReferences
+      .filter((reference) => reference.tableName.toLowerCase() === symbol.tableName)
+      .map((reference) => {
+        const start = reference.range.end - reference.tableName.length;
+        return createRangeFromOffsets(document, { start, end: reference.range.end });
+      });
+
+    for (const columnReference of parsed.columnReferences) {
+      if (columnReference.qualifier.toLowerCase() !== symbol.tableName) {
+        continue;
+      }
+
+      ranges.push(createRangeFromOffsets(document, columnReference.qualifierRange));
+    }
+
+    return dedupeRanges(ranges);
+  }
+
+  const aliases = buildAliasMap(parsed);
+  const ranges = parsed.columnReferences
+    .filter((reference) => {
+      const resolvedTable =
+        aliases.get(reference.qualifier.toLowerCase()) ?? reference.qualifier.toLowerCase();
+
+      return resolvedTable === symbol.tableName && reference.columnName.toLowerCase() === symbol.columnName;
+    })
+    .map((reference) => createRangeFromOffsets(document, reference.columnRange));
+
+  return dedupeRanges(ranges);
+}
+
+function dedupeRanges(ranges: vscode.Range[]): vscode.Range[] {
+  const seen = new Set<string>();
+  const deduped: vscode.Range[] = [];
+
+  for (const range of ranges) {
+    const key = `${range.start.line}:${range.start.character}:${range.end.line}:${range.end.character}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(range);
+  }
+
+  return deduped;
+}
+
+function createBatchCodeActions(
+  document: vscode.TextDocument,
+  diagnostics: readonly vscode.Diagnostic[],
+  schema: SqliteSchema
+): vscode.CodeAction[] {
+  const tableFixes = new Map<string, string>();
+  const columnFixes = new Map<string, string>();
+
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.code === DIAGNOSTIC_TABLE_CODE) {
+      const data = (diagnostic as vscode.Diagnostic & { data?: { name?: string } }).data;
+      const original = data?.name ?? "";
+      const suggestion = findClosestNames(original, schema.tables.map((table) => table.name))[0];
+
+      if (original && suggestion) {
+        tableFixes.set(original, suggestion);
+      }
+    }
+
+    if (diagnostic.code === DIAGNOSTIC_COLUMN_CODE) {
+      const data = (diagnostic as vscode.Diagnostic & {
+        data?: { tableName?: string; columnName?: string };
+      }).data;
+      const table = schema.tables.find((entry) => entry.name === data?.tableName);
+      const suggestion = table
+        ? findClosestNames(data?.columnName ?? "", table.columns.map((column) => column.name))[0]
+        : undefined;
+
+      if (data?.tableName && data.columnName && suggestion) {
+        columnFixes.set(`${data.tableName}.${data.columnName}`, suggestion);
+      }
+    }
+  }
+
+  const actions: vscode.CodeAction[] = [];
+
+  if (tableFixes.size > 0) {
+    const action = new vscode.CodeAction("Fix all missing table names", vscode.CodeActionKind.QuickFix);
+    action.edit = new vscode.WorkspaceEdit();
+    action.diagnostics = [...diagnostics.filter((item) => item.code === DIAGNOSTIC_TABLE_CODE)];
+
+    for (const diagnostic of action.diagnostics) {
+      const data = (diagnostic as vscode.Diagnostic & { data?: { name?: string } }).data;
+      const replacement = data?.name ? tableFixes.get(data.name) : undefined;
+
+      if (replacement) {
+        action.edit.replace(document.uri, diagnostic.range, replacement);
+      }
+    }
+
+    actions.push(action);
+  }
+
+  if (columnFixes.size > 0) {
+    const action = new vscode.CodeAction("Fix all missing column names", vscode.CodeActionKind.QuickFix);
+    action.edit = new vscode.WorkspaceEdit();
+    action.diagnostics = [...diagnostics.filter((item) => item.code === DIAGNOSTIC_COLUMN_CODE)];
+
+    for (const diagnostic of action.diagnostics) {
+      const data = (diagnostic as vscode.Diagnostic & {
+        data?: { tableName?: string; columnName?: string };
+      }).data;
+      const key = data?.tableName && data.columnName ? `${data.tableName}.${data.columnName}` : "";
+      const replacement = columnFixes.get(key);
+
+      if (replacement) {
+        action.edit.replace(document.uri, diagnostic.range, replacement);
+      }
+    }
+
+    actions.push(action);
+  }
+
+  return actions;
+}
+
+function withDiagnosticData<T>(
+  diagnostic: vscode.Diagnostic,
+  code: string,
+  data: T
+): vscode.Diagnostic & { data: T } {
+  diagnostic.code = code;
+  (diagnostic as vscode.Diagnostic & { data: T }).data = data;
+  return diagnostic as vscode.Diagnostic & { data: T };
+}
+
+function createReplacementCodeAction(
+  document: vscode.TextDocument,
+  diagnostic: vscode.Diagnostic,
+  replacement: string,
+  title: string
+): vscode.CodeAction {
+  const action = new vscode.CodeAction(title, vscode.CodeActionKind.QuickFix);
+  action.diagnostics = [diagnostic];
+  action.isPreferred = true;
+  action.edit = new vscode.WorkspaceEdit();
+  action.edit.replace(document.uri, diagnostic.range, replacement);
+  return action;
+}
+
+function findClosestNames(target: string, candidates: string[]): string[] {
+  const normalizedTarget = target.toLowerCase();
+
+  return candidates
+    .map((candidate) => ({
+      candidate,
+      score: levenshtein(normalizedTarget, candidate.toLowerCase())
+    }))
+    .sort((left, right) => left.score - right.score || left.candidate.localeCompare(right.candidate))
+    .slice(0, 3)
+    .map((entry) => entry.candidate);
+}
+
+function renderQueryResultDocument(
+  title: string,
+  databasePath: string,
+  sql: string,
+  rows: Record<string, unknown>[]
+): string {
+  const lines: string[] = [];
+  lines.push(`# ${title}`);
+  lines.push("");
+  lines.push(`Database: \`${databasePath}\``);
+  lines.push("");
+  lines.push("```sql");
+  lines.push(sql);
+  lines.push("```");
+  lines.push("");
+  lines.push(`Rows: ${rows.length}`);
+  lines.push("");
+
+  if (rows.length === 0) {
+    lines.push("_No rows returned._");
+    return lines.join("\n");
+  }
+
+  const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  lines.push(`| ${columns.join(" | ")} |`);
+  lines.push(`| ${columns.map(() => "---").join(" | ")} |`);
+
+  for (const row of rows.slice(0, 50)) {
+    lines.push(`| ${columns.map((column) => escapeMarkdownTableCell(formatCellValue(row[column]))).join(" | ")} |`);
+  }
+
+  if (rows.length > 50) {
+    lines.push("");
+    lines.push(`_Showing first 50 of ${rows.length} rows._`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatCellValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function levenshtein(left: string, right: string): number {
+  const matrix = Array.from({ length: left.length + 1 }, () => new Array<number>(right.length + 1).fill(0));
+
+  for (let i = 0; i <= left.length; i += 1) {
+    matrix[i][0] = i;
+  }
+
+  for (let j = 0; j <= right.length; j += 1) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= left.length; i += 1) {
+    for (let j = 1; j <= right.length; j += 1) {
+      const cost = left[i - 1] === right[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return matrix[left.length][right.length];
 }

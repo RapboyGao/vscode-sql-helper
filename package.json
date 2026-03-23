@@ -26,6 +26,14 @@
       {
         "command": "sqlHelper.previewTable",
         "title": "SQL Helper: Preview SQLite Table"
+      },
+      {
+        "command": "sqlHelper.previewQuery",
+        "title": "SQL Helper: Preview Current SQL Query"
+      },
+      {
+        "command": "sqlHelper.explainQuery",
+        "title": "SQL Helper: Explain Current SQL Query"
       }
     ],
     "customEditors": [
@@ -70,5 +78,8 @@
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
     "vue": "^3.5.13"
+  },
+  "dependencies": {
+    "node-sql-parser": "^5.4.0"
   }
 }
