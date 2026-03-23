@@ -694,6 +694,23 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.table-tab-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.table-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  min-width: 260px;
+  flex: 1 1 320px;
+}
+
 .data-grid-wrap {
   overflow: auto;
   border-radius: 18px;
@@ -739,6 +756,29 @@ button:disabled {
 .row-actions {
   display: flex;
   gap: 10px;
+}
+
+.structure-grid th,
+.structure-grid td {
+  white-space: normal;
+}
+
+.checkbox-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.checkbox-cell input {
+  width: 16px;
+  height: 16px;
+}
+
+.structure-note {
+  margin: 0;
 }
 
 @media (max-width: 1100px) {
