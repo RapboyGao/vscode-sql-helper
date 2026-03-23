@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 type AnalysisResult = {
   databases: string[];
@@ -19,18 +19,6 @@ type DatabaseProfile = {
   lastUsedAt: string;
 };
 
-type InitState = {
-  host: "panel" | "sidebar";
-  profiles: DatabaseProfile[];
-  activeProfileId: string | null;
-  openedFile: {
-    path: string;
-    name: string;
-    isSqliteFile: boolean;
-  } | null;
-  sqliteSchema: SqliteSchema | null;
-};
-
 type SqliteTableColumn = {
   name: string;
   type: string;
@@ -48,6 +36,32 @@ type SqliteSchema = {
   path: string;
   tableCount: number;
   tables: SqliteTable[];
+};
+
+type InitState = {
+  host: "panel" | "sidebar";
+  profiles: DatabaseProfile[];
+  activeProfileId: string | null;
+  openedFile: {
+    path: string;
+    name: string;
+    isSqliteFile: boolean;
+  } | null;
+  sqliteSchema: SqliteSchema | null;
+};
+
+type TableDataRow = {
+  rowKey: Record<string, unknown>;
+  values: Record<string, unknown>;
+};
+
+type TableDataPayload = {
+  tableName: string;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  keyColumns: string[];
+  rows: TableDataRow[];
 };
 
 type VsCodeApi = {
@@ -75,6 +89,13 @@ const profilePath = ref("");
 const profileType = ref<DatabaseProfile["type"]>("sqlite");
 const profileMessage = ref("");
 const schemaPending = ref(false);
+const panelSection = ref<"schema" | "analyzer">("analyzer");
+const selectedTableName = ref("");
+const tableData = ref<TableDataPayload | null>(null);
+const tableDataPending = ref(false);
+const tableDataError = ref("");
+const dirtyRows = ref<Record<string, Record<string, string>>>({});
+const rowSavePending = ref<Record<string, boolean>>({});
 
 const activeProfile = computed(() => {
   if (!activeProfileId.value) {
@@ -85,6 +106,18 @@ const activeProfile = computed(() => {
 });
 
 const isSidebar = computed(() => host.value === "sidebar");
+const isSqliteEditor = computed(() => !isSidebar.value && Boolean(openedFile.value?.isSqliteFile));
+const activeTable = computed(
+  () => sqliteSchema.value?.tables.find((table) => table.name === selectedTableName.value) ?? null
+);
+const currentPage = computed(() => tableData.value?.page ?? 0);
+const totalPages = computed(() => {
+  if (!tableData.value) {
+    return 1;
+  }
+
+  return Math.max(1, Math.ceil(tableData.value.totalRows / tableData.value.pageSize));
+});
 
 const schemaInsights = computed(() => {
   if (!sqliteSchema.value) {
@@ -161,6 +194,26 @@ const schemaInsights = computed(() => {
     suggestedColumns
   };
 });
+
+watch(
+  () => sqliteSchema.value?.tables.map((table) => table.name).join(","),
+  () => {
+    if (!sqliteSchema.value?.tables.length) {
+      selectedTableName.value = "";
+      tableData.value = null;
+      dirtyRows.value = {};
+      return;
+    }
+
+    if (!selectedTableName.value || !sqliteSchema.value.tables.some((table) => table.name === selectedTableName.value)) {
+      selectedTableName.value = sqliteSchema.value.tables[0].name;
+    }
+
+    if (isSqliteEditor.value && selectedTableName.value) {
+      void loadTableData(selectedTableName.value, 0);
+    }
+  }
+);
 
 function referenceLabel(kind: string): string {
   if (kind === "table") {
@@ -239,6 +292,84 @@ function saveProfile(): void {
   });
 }
 
+function loadTableData(tableName = selectedTableName.value, page = 0): void {
+  if (!tableName) {
+    return;
+  }
+
+  tableDataPending.value = true;
+  tableDataError.value = "";
+  selectedTableName.value = tableName;
+  vscode?.postMessage({
+    type: "loadTableData",
+    tableName,
+    page
+  });
+}
+
+function rowKeyId(row: TableDataRow): string {
+  return JSON.stringify(row.rowKey);
+}
+
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function editableValue(row: TableDataRow, columnName: string): string {
+  return dirtyRows.value[rowKeyId(row)]?.[columnName] ?? displayValue(row.values[columnName]);
+}
+
+function updateDraft(row: TableDataRow, columnName: string, value: string): void {
+  const key = rowKeyId(row);
+  dirtyRows.value = {
+    ...dirtyRows.value,
+    [key]: {
+      ...(dirtyRows.value[key] ?? Object.fromEntries(
+        Object.entries(row.values).map(([entryKey, entryValue]) => [entryKey, displayValue(entryValue)])
+      )),
+      [columnName]: value
+    }
+  };
+}
+
+function resetRowDraft(row: TableDataRow): void {
+  const next = { ...dirtyRows.value };
+  delete next[rowKeyId(row)];
+  dirtyRows.value = next;
+}
+
+function saveRow(row: TableDataRow): void {
+  if (!selectedTableName.value) {
+    return;
+  }
+
+  const key = rowKeyId(row);
+  const values = dirtyRows.value[key] ?? Object.fromEntries(
+    Object.entries(row.values).map(([columnName, value]) => [columnName, displayValue(value)])
+  );
+
+  rowSavePending.value = {
+    ...rowSavePending.value,
+    [key]: true
+  };
+  tableDataError.value = "";
+  vscode?.postMessage({
+    type: "updateTableRow",
+    tableName: selectedTableName.value,
+    page: currentPage.value,
+    rowKey: row.rowKey,
+    values
+  });
+}
+
 function applyState(state: InitState): void {
   host.value = state.host;
   profiles.value = state.profiles;
@@ -246,6 +377,7 @@ function applyState(state: InitState): void {
   openedFile.value = state.openedFile;
   sqliteSchema.value = state.sqliteSchema;
   schemaPending.value = false;
+  panelSection.value = state.openedFile?.isSqliteFile ? "schema" : "analyzer";
 
   const current = state.profiles.find((profile) => profile.id === state.activeProfileId) ?? null;
 
@@ -266,7 +398,17 @@ onMounted(() => {
 
     if (type === "init") {
       applyState(payload as InitState);
-      analyze();
+
+      if (openedFile.value?.isSqliteFile) {
+        const firstTable = (payload as InitState).sqliteSchema?.tables[0]?.name;
+
+        if (firstTable) {
+          selectedTableName.value = firstTable;
+          loadTableData(firstTable, 0);
+        }
+      } else {
+        analyze();
+      }
       return;
     }
 
@@ -301,6 +443,22 @@ onMounted(() => {
     if (type === "schemaError") {
       schemaPending.value = false;
       error.value = String(payload ?? "Failed to load SQLite schema");
+      return;
+    }
+
+    if (type === "tableDataLoaded" || type === "rowUpdated") {
+      tableDataPending.value = false;
+      tableData.value = payload as TableDataPayload;
+      selectedTableName.value = tableData.value.tableName;
+      dirtyRows.value = {};
+      rowSavePending.value = {};
+      return;
+    }
+
+    if (type === "tableDataError") {
+      tableDataPending.value = false;
+      rowSavePending.value = {};
+      tableDataError.value = String(payload ?? "Failed to load table data");
       return;
     }
 
@@ -424,280 +582,521 @@ onMounted(() => {
       </section>
     </template>
 
-    <template v-else>
-
-    <section class="hero">
-      <div class="hero-copy">
-        <p class="eyebrow">SQL Helper</p>
-        <h1>Dark SQL workspace for context, validation, and live SQLite inspection.</h1>
-        <p class="subtitle">
-          Keep one database active, inspect schema structure, and validate SQL against the current
-          SQLite target without leaving the editor.
-        </p>
-        <div class="hero-actions">
-          <button type="button" :disabled="pending" @click="analyze">
-            {{ pending ? "Analyzing..." : "Analyze SQL" }}
-          </button>
-          <button type="button" class="button-secondary" @click="previewQuery">Preview Query</button>
-          <button type="button" class="button-ghost" @click="explainQuery">Explain Plan</button>
-        </div>
-        <div v-if="openedFile" class="opened-file">
-          <span class="opened-file-label">Opened file</span>
-          <strong>{{ openedFile.name }}</strong>
-          <span class="opened-file-path">{{ openedFile.path }}</span>
-        </div>
-      </div>
-
-      <div class="hero-metrics">
-        <div class="metric">
-          <span class="metric-label">Saved Profiles</span>
-          <strong>{{ profiles.length }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">SQLite Tables</span>
-          <strong>{{ sqliteSchema?.tableCount ?? 0 }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">Databases</span>
-          <strong>{{ result?.databases.length ?? 0 }}</strong>
-        </div>
-        <div class="metric">
-          <span class="metric-label">References</span>
-          <strong>{{ result?.references.length ?? 0 }}</strong>
-        </div>
-      </div>
-    </section>
-
-    <section class="workspace">
-      <section class="panel panel-input">
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">Query Input</p>
-            <h2>SQL source</h2>
+    <template v-else-if="isSqliteEditor">
+      <section class="db-studio">
+        <section class="panel studio-sidebar">
+          <div class="panel-head compact">
+            <div>
+              <p class="panel-kicker">SQLite Schema</p>
+              <h2>{{ openedFile?.name ?? activeProfile?.name ?? "SQLite database" }}</h2>
+            </div>
+            <span class="status-pill" :class="{ active: schemaPending }">
+              {{ sqliteSchema ? `${sqliteSchema.tableCount} tables` : "No schema" }}
+            </span>
           </div>
-          <span class="status-pill" :class="{ active: pending }">
-            {{ pending ? "Parser busy" : "Ready to analyze" }}
-          </span>
+
+          <p class="schema-path">{{ sqliteSchema?.path ?? openedFile?.path }}</p>
+
+          <div class="studio-nav">
+            <button
+              type="button"
+              class="tab-button"
+              :class="{ active: panelSection === 'schema' }"
+              @click="panelSection = 'schema'"
+            >
+              Schema
+            </button>
+            <button
+              type="button"
+              class="tab-button"
+              :class="{ active: panelSection === 'analyzer' }"
+              @click="panelSection = 'analyzer'"
+            >
+              Analyzer
+            </button>
+          </div>
+
+          <div v-if="sqliteSchema?.tables.length" class="table-nav-list">
+            <button
+              v-for="table in sqliteSchema.tables"
+              :key="table.name"
+              type="button"
+              class="table-nav-item"
+              :class="{ active: table.name === selectedTableName }"
+              @click="loadTableData(table.name, 0)"
+            >
+              <strong>{{ table.name }}</strong>
+              <span>{{ table.columns.length }} cols</span>
+            </button>
+          </div>
+          <p v-else class="empty">No tables found in this database.</p>
+        </section>
+
+        <section v-if="panelSection === 'schema'" class="studio-main">
+          <section class="panel studio-hero">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">Schema Detail</p>
+                <h2>{{ activeTable?.name ?? "Choose a table" }}</h2>
+              </div>
+              <div class="hero-actions">
+                <button
+                  v-if="activeTable"
+                  type="button"
+                  class="button-secondary"
+                  @click="previewTable(activeTable.name)"
+                >
+                  Open Preview
+                </button>
+                <button type="button" class="button-ghost" @click="openAnalyzer">
+                  Open Analyzer
+                </button>
+              </div>
+            </div>
+
+            <div v-if="activeTable" class="table-summary-grid">
+              <article class="metric compact-metric">
+                <span class="metric-label">Columns</span>
+                <strong>{{ activeTable.columns.length }}</strong>
+              </article>
+              <article class="metric compact-metric">
+                <span class="metric-label">Primary Keys</span>
+                <strong>{{ activeTable.columns.filter((column) => column.primaryKey).length }}</strong>
+              </article>
+              <article class="metric compact-metric">
+                <span class="metric-label">Rows</span>
+                <strong>{{ tableData?.totalRows ?? 0 }}</strong>
+              </article>
+            </div>
+
+            <details v-if="activeTable?.createSql" class="ddl-block" open>
+              <summary>DDL</summary>
+              <pre>{{ activeTable.createSql }}</pre>
+            </details>
+          </section>
+
+          <section class="panel studio-data-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">Editable Data</p>
+                <h2>{{ activeTable?.name ?? "Table rows" }}</h2>
+              </div>
+              <div class="table-toolbar">
+                <button
+                  type="button"
+                  class="button-ghost"
+                  :disabled="tableDataPending || currentPage === 0"
+                  @click="loadTableData(selectedTableName, currentPage - 1)"
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  class="button-ghost"
+                  :disabled="tableDataPending || currentPage + 1 >= totalPages"
+                  @click="loadTableData(selectedTableName, currentPage + 1)"
+                >
+                  Next
+                </button>
+                <span class="status-meta">Page {{ currentPage + 1 }} / {{ totalPages }}</span>
+              </div>
+            </div>
+
+            <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
+            <p v-else-if="tableDataPending" class="empty">Loading rows…</p>
+
+            <div v-else-if="tableData?.rows.length" class="data-grid-wrap">
+              <table class="data-grid">
+                <thead>
+                  <tr>
+                    <th v-for="column in activeTable?.columns ?? []" :key="column.name">
+                      {{ column.name }}
+                    </th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
+                    <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
+                      <input
+                        :value="editableValue(row, column.name)"
+                        class="grid-input"
+                        type="text"
+                        @input="updateDraft(row, column.name, ($event.target as HTMLInputElement).value)"
+                      />
+                    </td>
+                    <td class="row-actions">
+                      <button
+                        type="button"
+                        class="button-secondary"
+                        :disabled="rowSavePending[rowKeyId(row)]"
+                        @click="saveRow(row)"
+                      >
+                        {{ rowSavePending[rowKeyId(row)] ? "Saving..." : "Save" }}
+                      </button>
+                      <button type="button" class="button-ghost" @click="resetRowDraft(row)">Reset</button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="empty">No rows loaded for this table.</p>
+          </section>
+        </section>
+
+        <section v-else class="studio-main">
+          <section class="panel studio-hero">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">SQL Analyzer</p>
+                <h2>Run schema-aware checks against the active SQLite database</h2>
+              </div>
+              <button type="button" :disabled="pending" @click="analyze">
+                {{ pending ? "Analyzing..." : "Analyze SQL" }}
+              </button>
+            </div>
+
+            <label for="sqlite-editor-sql">SQL source</label>
+            <textarea id="sqlite-editor-sql" v-model="sql" spellcheck="false" />
+          </section>
+
+          <section class="panel panel-results">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">Reference Map</p>
+                <h2>Qualified objects</h2>
+              </div>
+            </div>
+
+            <div v-if="result?.references.length" class="reference-grid">
+              <article
+                v-for="reference in result.references"
+                :key="`${reference.kind}:${reference.value}`"
+                class="reference-card"
+              >
+                <span class="reference-kind">{{ referenceLabel(reference.kind) }}</span>
+                <strong>{{ reference.value }}</strong>
+              </article>
+            </div>
+            <p v-else class="empty">No references found.</p>
+          </section>
+
+          <section class="panel panel-validation">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">SQLite Checks</p>
+                <h2>Validation and suggestions</h2>
+              </div>
+            </div>
+
+            <div v-if="sqliteSchema" class="validation-grid">
+              <article class="validation-card">
+                <h3>Missing tables</h3>
+                <div v-if="schemaInsights.missingTables.length" class="token-list">
+                  <span
+                    v-for="table in schemaInsights.missingTables"
+                    :key="table"
+                    class="token token-warning"
+                  >
+                    {{ table }}
+                  </span>
+                </div>
+                <p v-else class="empty">No missing table references detected.</p>
+              </article>
+
+              <article class="validation-card">
+                <h3>Missing columns</h3>
+                <div v-if="schemaInsights.missingColumns.length" class="token-list">
+                  <span
+                    v-for="column in schemaInsights.missingColumns"
+                    :key="column"
+                    class="token token-warning"
+                  >
+                    {{ column }}
+                  </span>
+                </div>
+                <p v-else class="empty">No missing qualified columns detected.</p>
+              </article>
+            </div>
+            <p v-else class="empty">Load a SQLite database first to enable schema-aware validation.</p>
+          </section>
+        </section>
+      </section>
+    </template>
+
+    <template v-else>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">SQL Helper</p>
+          <h1>Dark SQL workspace for context, validation, and live SQLite inspection.</h1>
+          <p class="subtitle">
+            Keep one database active, inspect schema structure, and validate SQL against the current
+            SQLite target without leaving the editor.
+          </p>
+          <div class="hero-actions">
+            <button type="button" :disabled="pending" @click="analyze">
+              {{ pending ? "Analyzing..." : "Analyze SQL" }}
+            </button>
+            <button type="button" class="button-secondary" @click="previewQuery">Preview Query</button>
+            <button type="button" class="button-ghost" @click="explainQuery">Explain Plan</button>
+          </div>
+          <div v-if="openedFile" class="opened-file">
+            <span class="opened-file-label">Opened file</span>
+            <strong>{{ openedFile.name }}</strong>
+            <span class="opened-file-path">{{ openedFile.path }}</span>
+          </div>
         </div>
 
-        <label for="sql">Paste or edit the statement</label>
-        <textarea id="sql" v-model="sql" spellcheck="false" />
-
-        <div class="status-row">
-          <span class="status-pill" :class="{ active: pending }">
-            {{ pending ? "Rust parser running" : "Ready" }}
-          </span>
-          <span class="status-meta">{{ sql.length }} characters</span>
+        <div class="hero-metrics">
+          <div class="metric">
+            <span class="metric-label">Saved Profiles</span>
+            <strong>{{ profiles.length }}</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">SQLite Tables</span>
+            <strong>{{ sqliteSchema?.tableCount ?? 0 }}</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Databases</span>
+            <strong>{{ result?.databases.length ?? 0 }}</strong>
+          </div>
+          <div class="metric">
+            <span class="metric-label">References</span>
+            <strong>{{ result?.references.length ?? 0 }}</strong>
+          </div>
         </div>
       </section>
 
-      <section class="panel panel-summary">
+      <section class="workspace">
+        <section class="panel panel-input">
+          <div class="panel-head">
+            <div>
+              <p class="panel-kicker">Query Input</p>
+              <h2>SQL source</h2>
+            </div>
+            <span class="status-pill" :class="{ active: pending }">
+              {{ pending ? "Parser busy" : "Ready to analyze" }}
+            </span>
+          </div>
+
+          <label for="sql">Paste or edit the statement</label>
+          <textarea id="sql" v-model="sql" spellcheck="false" />
+
+          <div class="status-row">
+            <span class="status-pill" :class="{ active: pending }">
+              {{ pending ? "Rust parser running" : "Ready" }}
+            </span>
+            <span class="status-meta">{{ sql.length }} characters</span>
+          </div>
+        </section>
+
+        <section class="panel panel-summary">
+          <div class="panel-head compact">
+            <div>
+              <p class="panel-kicker">Database Context</p>
+              <h2>Saved targets</h2>
+            </div>
+          </div>
+
+          <label for="profile-select">Recent databases</label>
+          <select
+            id="profile-select"
+            class="input"
+            :value="activeProfileId ?? ''"
+            @change="selectProfile(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">No active profile</option>
+            <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
+              {{ profile.name }} · {{ profile.type }}
+            </option>
+          </select>
+
+          <div class="field-grid">
+            <div>
+              <label for="profile-name">Display name</label>
+              <input id="profile-name" v-model="profileName" class="input" type="text" />
+            </div>
+
+            <div>
+              <label for="profile-type">Type</label>
+              <select id="profile-type" v-model="profileType" class="input">
+                <option value="sqlite">SQLite</option>
+                <option value="generic">Generic</option>
+              </select>
+            </div>
+          </div>
+
+          <label for="profile-path">Database path</label>
+          <input id="profile-path" v-model="profilePath" class="input" type="text" spellcheck="false" />
+
+          <div class="actions-row">
+            <button type="button" class="button-secondary" @click="saveProfile">Save Profile</button>
+            <button
+              v-if="sqliteSchema?.tables.length"
+              type="button"
+              class="button-ghost"
+              @click="previewTable(sqliteSchema.tables[0].name)"
+            >
+              Preview First Table
+            </button>
+            <span v-if="profileMessage" class="mini-note">{{ profileMessage }}</span>
+          </div>
+
+          <div class="token-group">
+            <h3>Detected databases</h3>
+            <div v-if="result?.databases.length" class="token-list">
+              <span v-for="database in result.databases" :key="database" class="token token-database">
+                {{ database }}
+              </span>
+            </div>
+            <p v-else class="empty">No explicit database names detected.</p>
+          </div>
+
+          <div class="token-group">
+            <h3>Detected schemas</h3>
+            <div v-if="result?.schemas.length" class="token-list">
+              <span v-for="schema in result.schemas" :key="schema" class="token token-schema">
+                {{ schema }}
+              </span>
+            </div>
+            <p v-else class="empty">No explicit schema names detected.</p>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel panel-results">
         <div class="panel-head compact">
           <div>
-            <p class="panel-kicker">Database Context</p>
-            <h2>Saved targets</h2>
+            <p class="panel-kicker">Reference Map</p>
+            <h2>Qualified objects</h2>
           </div>
         </div>
 
-        <label for="profile-select">Recent databases</label>
-        <select
-          id="profile-select"
-          class="input"
-          :value="activeProfileId ?? ''"
-          @change="selectProfile(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">No active profile</option>
-          <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
-            {{ profile.name }} · {{ profile.type }}
-          </option>
-        </select>
-
-        <div class="field-grid">
-          <div>
-            <label for="profile-name">Display name</label>
-            <input id="profile-name" v-model="profileName" class="input" type="text" />
-          </div>
-
-          <div>
-            <label for="profile-type">Type</label>
-            <select id="profile-type" v-model="profileType" class="input">
-              <option value="sqlite">SQLite</option>
-              <option value="generic">Generic</option>
-            </select>
-          </div>
-        </div>
-
-        <label for="profile-path">Database path</label>
-        <input id="profile-path" v-model="profilePath" class="input" type="text" spellcheck="false" />
-
-        <div class="actions-row">
-          <button type="button" class="button-secondary" @click="saveProfile">Save Profile</button>
-          <button
-            v-if="sqliteSchema?.tables.length"
-            type="button"
-            class="button-ghost"
-            @click="previewTable(sqliteSchema.tables[0].name)"
+        <div v-if="result?.references.length" class="reference-grid">
+          <article
+            v-for="reference in result.references"
+            :key="`${reference.kind}:${reference.value}`"
+            class="reference-card"
           >
-            Preview First Table
-          </button>
-          <span v-if="profileMessage" class="mini-note">{{ profileMessage }}</span>
+            <span class="reference-kind">{{ referenceLabel(reference.kind) }}</span>
+            <strong>{{ reference.value }}</strong>
+          </article>
+        </div>
+        <p v-else class="empty">No references found.</p>
+
+        <p v-if="result?.note" class="note">{{ result.note }}</p>
+        <p v-if="error" class="error">{{ error }}</p>
+      </section>
+
+      <section class="panel panel-validation">
+        <div class="panel-head compact">
+          <div>
+            <p class="panel-kicker">SQLite Checks</p>
+            <h2>Validation and suggestions</h2>
+          </div>
         </div>
 
-        <div class="token-group">
-          <h3>Detected databases</h3>
-          <div v-if="result?.databases.length" class="token-list">
-            <span v-for="database in result.databases" :key="database" class="token token-database">
-              {{ database }}
-            </span>
+        <div v-if="sqliteSchema" class="validation-grid">
+          <article class="validation-card">
+            <h3>Missing tables</h3>
+            <div v-if="schemaInsights.missingTables.length" class="token-list">
+              <span
+                v-for="table in schemaInsights.missingTables"
+                :key="table"
+                class="token token-warning"
+              >
+                {{ table }}
+              </span>
+            </div>
+            <p v-else class="empty">No missing table references detected.</p>
+          </article>
+
+          <article class="validation-card">
+            <h3>Missing columns</h3>
+            <div v-if="schemaInsights.missingColumns.length" class="token-list">
+              <span
+                v-for="column in schemaInsights.missingColumns"
+                :key="column"
+                class="token token-warning"
+              >
+                {{ column }}
+              </span>
+            </div>
+            <p v-else class="empty">No missing qualified columns detected.</p>
+          </article>
+
+          <article class="validation-card">
+            <h3>Suggested tables</h3>
+            <div v-if="schemaInsights.suggestedTables.length" class="token-list">
+              <span
+                v-for="table in schemaInsights.suggestedTables"
+                :key="table"
+                class="token token-suggest"
+              >
+                {{ table }}
+              </span>
+            </div>
+            <p v-else class="empty">No additional table suggestions.</p>
+          </article>
+
+          <article class="validation-card">
+            <h3>Suggested columns</h3>
+            <div v-if="schemaInsights.suggestedColumns.length" class="token-list">
+              <span
+                v-for="column in schemaInsights.suggestedColumns"
+                :key="column"
+                class="token token-suggest"
+              >
+                {{ column }}
+              </span>
+            </div>
+            <p v-else class="empty">No column suggestions available.</p>
+          </article>
+        </div>
+        <p v-else class="empty">Load a SQLite database first to enable schema-aware validation.</p>
+      </section>
+
+      <section class="panel panel-schema">
+        <div class="panel-head compact">
+          <div>
+            <p class="panel-kicker">SQLite Schema</p>
+            <h2>Tables and columns</h2>
           </div>
-          <p v-else class="empty">No explicit database names detected.</p>
+          <span class="status-pill" :class="{ active: schemaPending }">
+            {{ schemaPending ? "Loading schema" : sqliteSchema ? `${sqliteSchema.tableCount} tables` : "No schema" }}
+          </span>
         </div>
 
-        <div class="token-group">
-          <h3>Detected schemas</h3>
-          <div v-if="result?.schemas.length" class="token-list">
-            <span v-for="schema in result.schemas" :key="schema" class="token token-schema">
-              {{ schema }}
-            </span>
-          </div>
-          <p v-else class="empty">No explicit schema names detected.</p>
+        <p v-if="sqliteSchema" class="schema-path">{{ sqliteSchema.path }}</p>
+        <p v-else class="empty">Select a SQLite profile or open a `.sqlite` file to inspect its schema.</p>
+
+        <div v-if="sqliteSchema?.tables.length" class="schema-grid">
+          <article v-for="table in sqliteSchema.tables" :key="table.name" class="schema-card">
+            <div class="schema-card-head">
+              <h3>{{ table.name }}</h3>
+              <span class="token token-schema">{{ table.columns.length }} cols</span>
+            </div>
+
+            <ul class="column-list">
+              <li v-for="column in table.columns" :key="`${table.name}:${column.name}`" class="column-row">
+                <div>
+                  <strong>{{ column.name }}</strong>
+                  <span class="column-type">{{ column.type || "TEXT" }}</span>
+                </div>
+                <div class="column-flags">
+                  <span v-if="column.primaryKey" class="flag">PK</span>
+                  <span v-if="column.notNull" class="flag flag-soft">NOT NULL</span>
+                </div>
+              </li>
+            </ul>
+
+            <details v-if="table.createSql" class="ddl-block">
+              <summary>DDL</summary>
+              <pre>{{ table.createSql }}</pre>
+            </details>
+          </article>
         </div>
       </section>
-    </section>
-
-    <section class="panel panel-results">
-      <div class="panel-head compact">
-        <div>
-          <p class="panel-kicker">Reference Map</p>
-          <h2>Qualified objects</h2>
-        </div>
-      </div>
-
-      <div v-if="result?.references.length" class="reference-grid">
-        <article
-          v-for="reference in result.references"
-          :key="`${reference.kind}:${reference.value}`"
-          class="reference-card"
-        >
-          <span class="reference-kind">{{ referenceLabel(reference.kind) }}</span>
-          <strong>{{ reference.value }}</strong>
-        </article>
-      </div>
-      <p v-else class="empty">No references found.</p>
-
-      <p v-if="result?.note" class="note">{{ result.note }}</p>
-      <p v-if="error" class="error">{{ error }}</p>
-    </section>
-
-    <section class="panel panel-validation">
-      <div class="panel-head compact">
-        <div>
-          <p class="panel-kicker">SQLite Checks</p>
-          <h2>Validation and suggestions</h2>
-        </div>
-      </div>
-
-      <div v-if="sqliteSchema" class="validation-grid">
-        <article class="validation-card">
-          <h3>Missing tables</h3>
-          <div v-if="schemaInsights.missingTables.length" class="token-list">
-            <span
-              v-for="table in schemaInsights.missingTables"
-              :key="table"
-              class="token token-warning"
-            >
-              {{ table }}
-            </span>
-          </div>
-          <p v-else class="empty">No missing table references detected.</p>
-        </article>
-
-        <article class="validation-card">
-          <h3>Missing columns</h3>
-          <div v-if="schemaInsights.missingColumns.length" class="token-list">
-            <span
-              v-for="column in schemaInsights.missingColumns"
-              :key="column"
-              class="token token-warning"
-            >
-              {{ column }}
-            </span>
-          </div>
-          <p v-else class="empty">No missing qualified columns detected.</p>
-        </article>
-
-        <article class="validation-card">
-          <h3>Suggested tables</h3>
-          <div v-if="schemaInsights.suggestedTables.length" class="token-list">
-            <span
-              v-for="table in schemaInsights.suggestedTables"
-              :key="table"
-              class="token token-suggest"
-            >
-              {{ table }}
-            </span>
-          </div>
-          <p v-else class="empty">No additional table suggestions.</p>
-        </article>
-
-        <article class="validation-card">
-          <h3>Suggested columns</h3>
-          <div v-if="schemaInsights.suggestedColumns.length" class="token-list">
-            <span
-              v-for="column in schemaInsights.suggestedColumns"
-              :key="column"
-              class="token token-suggest"
-            >
-              {{ column }}
-            </span>
-          </div>
-          <p v-else class="empty">No column suggestions available.</p>
-        </article>
-      </div>
-      <p v-else class="empty">Load a SQLite database first to enable schema-aware validation.</p>
-    </section>
-
-    <section class="panel panel-schema">
-      <div class="panel-head compact">
-        <div>
-          <p class="panel-kicker">SQLite Schema</p>
-          <h2>Tables and columns</h2>
-        </div>
-        <span class="status-pill" :class="{ active: schemaPending }">
-          {{ schemaPending ? "Loading schema" : sqliteSchema ? `${sqliteSchema.tableCount} tables` : "No schema" }}
-        </span>
-      </div>
-
-      <p v-if="sqliteSchema" class="schema-path">{{ sqliteSchema.path }}</p>
-      <p v-else class="empty">Select a SQLite profile or open a `.sqlite` file to inspect its schema.</p>
-
-      <div v-if="sqliteSchema?.tables.length" class="schema-grid">
-        <article v-for="table in sqliteSchema.tables" :key="table.name" class="schema-card">
-          <div class="schema-card-head">
-            <h3>{{ table.name }}</h3>
-            <span class="token token-schema">{{ table.columns.length }} cols</span>
-          </div>
-
-          <ul class="column-list">
-            <li v-for="column in table.columns" :key="`${table.name}:${column.name}`" class="column-row">
-              <div>
-                <strong>{{ column.name }}</strong>
-                <span class="column-type">{{ column.type || "TEXT" }}</span>
-              </div>
-              <div class="column-flags">
-                <span v-if="column.primaryKey" class="flag">PK</span>
-                <span v-if="column.notNull" class="flag flag-soft">NOT NULL</span>
-              </div>
-            </li>
-          </ul>
-
-          <details v-if="table.createSql" class="ddl-block">
-            <summary>DDL</summary>
-            <pre>{{ table.createSql }}</pre>
-          </details>
-        </article>
-      </div>
-    </section>
     </template>
   </main>
 </template>

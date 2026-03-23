@@ -37,6 +37,14 @@ type WebviewMessage =
   | { type: "saveProfile"; payload?: SaveProfileInput }
   | { type: "selectProfile"; profileId?: string | null }
   | { type: "refreshSchema" }
+  | { type: "loadTableData"; tableName?: string; page?: number }
+  | {
+      type: "updateTableRow";
+      tableName?: string;
+      page?: number;
+      rowKey?: Record<string, unknown>;
+      values?: Record<string, unknown>;
+    }
   | { type: "previewTable"; tableName?: string }
   | { type: "previewQuery" }
   | { type: "explainQuery" }
@@ -66,6 +74,20 @@ type SqliteSchema = {
   path: string;
   tableCount: number;
   tables: SqliteTable[];
+};
+
+type TableDataRow = {
+  rowKey: Record<string, unknown>;
+  values: Record<string, unknown>;
+};
+
+type TableDataPayload = {
+  tableName: string;
+  page: number;
+  pageSize: number;
+  totalRows: number;
+  keyColumns: string[];
+  rows: TableDataRow[];
 };
 
 type SchemaDocument = {
@@ -321,6 +343,42 @@ async function configureWebview(
         const text = error instanceof Error ? error.message : String(error);
         webview.postMessage({ type: "schemaError", payload: text });
       }
+    }
+
+    if (message.type === "loadTableData") {
+      try {
+        const payload = await loadActiveTableData(context, message.tableName, message.page ?? 0);
+        webview.postMessage({
+          type: "tableDataLoaded",
+          payload
+        });
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        webview.postMessage({ type: "tableDataError", payload: text });
+      }
+      return;
+    }
+
+    if (message.type === "updateTableRow") {
+      try {
+        const payload = await updateActiveTableRow(
+          context,
+          message.tableName,
+          message.page ?? 0,
+          message.rowKey ?? {},
+          message.values ?? {}
+        );
+        webview.postMessage({
+          type: "rowUpdated",
+          payload
+        });
+        await sqlHelperExplorerProvider?.refresh();
+        await refreshDiagnosticsForOpenSqlDocuments(context);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        webview.postMessage({ type: "tableDataError", payload: text });
+      }
+      return;
     }
 
     if (message.type === "previewTable") {
@@ -767,12 +825,163 @@ async function runSqliteCount(databasePath: string, sql: string): Promise<number
   return Number.isFinite(count) ? count : null;
 }
 
+async function loadActiveTableData(
+  context: vscode.ExtensionContext,
+  requestedTableName: string | undefined,
+  requestedPage: number
+): Promise<TableDataPayload> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    throw new Error("No active SQLite database selected.");
+  }
+
+  const table = resolveRequestedTable(schema, requestedTableName);
+  const keyColumns = table.columns.filter((column) => column.primaryKey).map((column) => column.name);
+  const page = Math.max(0, requestedPage);
+  const selectColumns = keyColumns.length > 0
+    ? "*"
+    : `"rowid" AS "__sqlhelper_rowid__", *`;
+  const rows = await runSqliteJson<Record<string, unknown>>(
+    schema.path,
+    `SELECT ${selectColumns} FROM ${quoteSqliteIdentifier(table.name)} LIMIT ${PREVIEW_PAGE_SIZE} OFFSET ${page * PREVIEW_PAGE_SIZE};`
+  );
+  const totalRows = await runSqliteCount(
+    schema.path,
+    `SELECT COUNT(*) AS total FROM ${quoteSqliteIdentifier(table.name)};`
+  );
+
+  return {
+    tableName: table.name,
+    page,
+    pageSize: PREVIEW_PAGE_SIZE,
+    totalRows: totalRows ?? rows.length,
+    keyColumns: keyColumns.length > 0 ? keyColumns : ["__sqlhelper_rowid__"],
+    rows: rows.map((row) => {
+      const rowKeySource = keyColumns.length > 0 ? keyColumns : ["__sqlhelper_rowid__"];
+      const rowKey = Object.fromEntries(rowKeySource.map((columnName) => [columnName, row[columnName]]));
+      const values = { ...row };
+      delete values.__sqlhelper_rowid__;
+      return {
+        rowKey,
+        values
+      };
+    })
+  };
+}
+
+async function updateActiveTableRow(
+  context: vscode.ExtensionContext,
+  requestedTableName: string | undefined,
+  requestedPage: number,
+  rowKey: Record<string, unknown>,
+  values: Record<string, unknown>
+): Promise<TableDataPayload> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    throw new Error("No active SQLite database selected.");
+  }
+
+  const table = resolveRequestedTable(schema, requestedTableName);
+  const rowKeyEntries = Object.entries(rowKey);
+
+  if (rowKeyEntries.length === 0) {
+    throw new Error("Missing row identity for update.");
+  }
+
+  const allowedColumns = new Set(table.columns.map((column) => column.name));
+  const updateEntries = Object.entries(values).filter(([columnName]) => allowedColumns.has(columnName));
+
+  if (updateEntries.length === 0) {
+    throw new Error("No editable columns provided.");
+  }
+
+  const setClause = updateEntries
+    .map(([columnName, value]) => `${quoteSqliteIdentifier(columnName)} = ${toSqliteValue(value)}`)
+    .join(", ");
+  const whereClause = rowKeyEntries
+    .map(([columnName, value]) => {
+      if (value === null || value === undefined) {
+        return columnName === "__sqlhelper_rowid__"
+          ? `"rowid" IS NULL`
+          : `${quoteSqliteIdentifier(columnName)} IS NULL`;
+      }
+
+      return columnName === "__sqlhelper_rowid__"
+        ? `"rowid" = ${toSqliteValue(value)}`
+        : `${quoteSqliteIdentifier(columnName)} = ${toSqliteValue(value)}`;
+    })
+    .join(" AND ");
+
+  await runSqliteStatement(
+    schema.path,
+    `UPDATE ${quoteSqliteIdentifier(table.name)} SET ${setClause} WHERE ${whereClause};`
+  );
+  invalidateSchemaCache(schema.path);
+  return loadActiveTableData(context, table.name, requestedPage);
+}
+
+function resolveRequestedTable(schema: SqliteSchema, requestedTableName: string | undefined): SqliteTable {
+  const tableName = requestedTableName ?? schema.tables[0]?.name;
+  const table = tableName
+    ? schema.tables.find((entry) => entry.name.toLowerCase() === tableName.toLowerCase())
+    : undefined;
+
+  if (!table) {
+    throw new Error("No SQLite table available.");
+  }
+
+  return table;
+}
+
+async function runSqliteStatement(databasePath: string, sql: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("sqlite3", [databasePath, sql]);
+    let errors = "";
+
+    child.stderr.on("data", (chunk) => {
+      errors += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      reject(new Error(errors || `sqlite3 exited with code ${code ?? "unknown"}`));
+    });
+  });
+}
+
 function quoteSqliteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, "\"\"")}"`;
 }
 
 function quoteSqliteLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+function toSqliteValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "NULL";
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : "NULL";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "1" : "0";
+  }
+
+  if (typeof value === "object") {
+    return quoteSqliteLiteral(JSON.stringify(value));
+  }
+
+  return quoteSqliteLiteral(String(value));
 }
 
 function createSqlCompletionProvider(

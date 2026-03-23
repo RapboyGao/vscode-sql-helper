@@ -602,9 +602,149 @@ button:disabled {
   box-shadow: none;
 }
 
+.db-studio {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.studio-sidebar,
+.studio-main {
+  min-height: 0;
+}
+
+.studio-main {
+  display: grid;
+  gap: 18px;
+}
+
+.studio-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.tab-button,
+.table-nav-item {
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(9, 16, 28, 0.8);
+  color: #dce8f8;
+  box-shadow: none;
+}
+
+.tab-button.active,
+.table-nav-item.active {
+  border-color: rgba(96, 165, 250, 0.34);
+  background: rgba(22, 38, 63, 0.96);
+}
+
+.table-nav-list {
+  display: grid;
+  gap: 10px;
+  max-height: calc(100vh - 240px);
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.table-nav-item {
+  justify-content: space-between;
+  text-align: left;
+  padding: 14px;
+}
+
+.table-nav-item strong,
+.table-nav-item span {
+  display: block;
+}
+
+.table-nav-item span {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.table-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.compact-metric {
+  min-height: 0;
+}
+
+.compact-metric strong {
+  font-size: 32px;
+}
+
+.studio-data-panel,
+.studio-hero {
+  overflow: hidden;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.data-grid-wrap {
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(7, 12, 22, 0.84);
+}
+
+.data-grid {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.data-grid th,
+.data-grid td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  border-right: 1px solid rgba(148, 163, 184, 0.08);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.data-grid th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(11, 19, 33, 0.98);
+  text-align: left;
+  color: #dbeafe;
+}
+
+.grid-input {
+  min-width: 180px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(13, 21, 37, 0.96);
+  color: #edf5ff;
+}
+
+.row-actions {
+  display: flex;
+  gap: 10px;
+}
+
 @media (max-width: 1100px) {
   .hero,
-  .workspace {
+  .workspace,
+  .db-studio {
     grid-template-columns: 1fr;
   }
 }
@@ -617,7 +757,8 @@ button:disabled {
   .hero-metrics,
   .reference-grid,
   .validation-grid,
-  .field-grid {
+  .field-grid,
+  .table-summary-grid {
     grid-template-columns: 1fr;
   }
 
