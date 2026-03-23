@@ -16,7 +16,7 @@
     "onCommand:sqlHelper.openAnalyzer",
     "onCustomEditor:sqlHelper.sqliteViewer",
     "onLanguage:sql",
-    "onView:sqlHelper.sidebarView"
+    "onView:sqlHelper.explorerView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -36,6 +36,10 @@
       {
         "command": "sqlHelper.explainQuery",
         "title": "SQL Helper: Explain Current SQL Query"
+      },
+      {
+        "command": "sqlHelper.refreshExplorer",
+        "title": "SQL Helper: Refresh Explorer"
       }
     ],
     "viewsContainers": {
@@ -50,9 +54,8 @@
     "views": {
       "sqlHelper": [
         {
-          "id": "sqlHelper.sidebarView",
-          "name": "Analyzer",
-          "type": "webview"
+          "id": "sqlHelper.explorerView",
+          "name": "Explorer"
         }
       ]
     },

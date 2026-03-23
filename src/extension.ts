@@ -86,6 +86,7 @@ const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
 let sqlHelperPreviewProvider: MemoryDocumentProvider | null = null;
 let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
+let sqlHelperExplorerProvider: SqlHelperExplorerProvider | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("sqlHelper");
@@ -95,7 +96,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const queryProvider = new MemoryDocumentProvider();
   sqlHelperPreviewProvider = previewProvider;
   sqlHelperQueryProvider = queryProvider;
-  const sidebarProvider = new SqlHelperSidebarProvider(context);
+  const explorerProvider = new SqlHelperExplorerProvider(context);
+  sqlHelperExplorerProvider = explorerProvider;
 
   context.subscriptions.push(
     diagnostics,
@@ -119,10 +121,17 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("sqlHelper.explainQuery", async () => {
       await explainQuery(context, queryProvider);
     }),
-    vscode.window.registerWebviewViewProvider("sqlHelper.sidebarView", sidebarProvider, {
-      webviewOptions: {
-        retainContextWhenHidden: true
-      }
+    vscode.commands.registerCommand("sqlHelper.selectProfileNode", async (profileId?: string) => {
+      await context.globalState.update(ACTIVE_PROFILE_KEY, profileId ?? null);
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+    }),
+    vscode.commands.registerCommand("sqlHelper.refreshExplorer", async () => {
+      await explorerProvider.refresh();
+    }),
+    vscode.window.createTreeView("sqlHelper.explorerView", {
+      treeDataProvider: explorerProvider,
+      showCollapseAll: true
     }),
     vscode.window.registerCustomEditorProvider(
       "sqlHelper.sqliteViewer",
@@ -162,6 +171,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       diagnostics.delete(document.uri);
+    }),
+    vscode.window.onDidChangeActiveTextEditor(() => {
+      void explorerProvider.refresh();
     })
   );
 
@@ -211,19 +223,6 @@ class SqliteViewerProvider implements vscode.CustomReadonlyEditorProvider {
   }
 }
 
-class SqlHelperSidebarProvider implements vscode.WebviewViewProvider {
-  constructor(private readonly context: vscode.ExtensionContext) {}
-
-  async resolveWebviewView(
-    webviewView: vscode.WebviewView,
-    _context: vscode.WebviewViewResolveContext,
-    _token: vscode.CancellationToken
-  ): Promise<void> {
-    webviewView.title = "SQL Helper";
-    await configureWebview(this.context, webviewView.webview, undefined, "sidebar");
-  }
-}
-
 async function configureWebview(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,
@@ -239,6 +238,7 @@ async function configureWebview(
   webview.onDidReceiveMessage(async (message: WebviewMessage) => {
     if (message.type === "ready") {
       await ensureSqliteProfileForFile(context, openedFile);
+      await sqlHelperExplorerProvider?.refresh();
       webview.postMessage({
         type: "init",
         payload: await getWebviewState(context, openedFile, host)
@@ -268,6 +268,7 @@ async function configureWebview(
             sqliteSchema: await getActiveSqliteSchema(context)
           }
         });
+        await sqlHelperExplorerProvider?.refresh();
         await refreshDiagnosticsForOpenSqlDocuments(context);
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
@@ -286,6 +287,7 @@ async function configureWebview(
           sqliteSchema: await getActiveSqliteSchema(context)
         }
       });
+      await sqlHelperExplorerProvider?.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
       return;
     }
@@ -321,6 +323,197 @@ async function configureWebview(
       await vscode.commands.executeCommand("sqlHelper.openAnalyzer");
     }
   });
+}
+
+type ExplorerNode =
+  | {
+      kind: "section";
+      id: string;
+      label: string;
+      description?: string;
+    }
+  | {
+      kind: "profile";
+      profile: DatabaseProfile;
+      active: boolean;
+    }
+  | {
+      kind: "table";
+      table: SqliteTable;
+    }
+  | {
+      kind: "column";
+      tableName: string;
+      column: SqliteTableColumn;
+    }
+  | {
+      kind: "action";
+      id: string;
+      label: string;
+      command: string;
+      icon: string;
+      description?: string;
+    };
+
+class SqlHelperExplorerProvider implements vscode.TreeDataProvider<ExplorerNode> {
+  private readonly emitter = new vscode.EventEmitter<ExplorerNode | undefined | null | void>();
+  readonly onDidChangeTreeData = this.emitter.event;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  async refresh(): Promise<void> {
+    this.emitter.fire();
+  }
+
+  async getChildren(element?: ExplorerNode): Promise<ExplorerNode[]> {
+    const profiles = getProfiles(this.context);
+    const activeProfileId = this.context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null);
+    const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null;
+    const activeSchema = activeProfile?.type === "sqlite" ? await getActiveSqliteSchema(this.context) : null;
+
+    if (!element) {
+      return [
+        {
+          kind: "section",
+          id: "active",
+          label: "Active Database",
+          description: activeProfile?.name ?? "None"
+        },
+        {
+          kind: "section",
+          id: "saved",
+          label: "Saved Databases",
+          description: profiles.length ? `${profiles.length}` : "Empty"
+        },
+        {
+          kind: "action",
+          id: "open-analyzer",
+          label: "Open Analyzer",
+          command: "sqlHelper.openAnalyzer",
+          icon: "search-view-icon"
+        },
+        {
+          kind: "action",
+          id: "preview-query",
+          label: "Preview Current SQL",
+          command: "sqlHelper.previewQuery",
+          icon: "play"
+        },
+        {
+          kind: "action",
+          id: "explain-query",
+          label: "Explain Current SQL",
+          command: "sqlHelper.explainQuery",
+          icon: "symbol-event"
+        }
+      ];
+    }
+
+    if (element.kind === "section" && element.id === "active") {
+      if (!activeProfile) {
+        return [];
+      }
+
+      const nodes: ExplorerNode[] = [
+        {
+          kind: "profile",
+          profile: activeProfile,
+          active: true
+        }
+      ];
+
+      if (activeSchema) {
+        nodes.push(
+          ...activeSchema.tables.map(
+            (table): ExplorerNode => ({ kind: "table", table })
+          )
+        );
+      }
+
+      return nodes;
+    }
+
+    if (element.kind === "section" && element.id === "saved") {
+      return profiles.map((profile) => ({
+        kind: "profile",
+        profile,
+        active: profile.id === activeProfileId
+      }));
+    }
+
+    if (element.kind === "table") {
+      return element.table.columns.map((column) => ({
+        kind: "column",
+        tableName: element.table.name,
+        column
+      }));
+    }
+
+    return [];
+  }
+
+  getTreeItem(element: ExplorerNode): vscode.TreeItem {
+    if (element.kind === "section") {
+      const item = new vscode.TreeItem(
+        element.label,
+        vscode.TreeItemCollapsibleState.Expanded
+      );
+      item.id = element.id;
+      item.description = element.description;
+      item.contextValue = "sqlHelper.section";
+      return item;
+    }
+
+    if (element.kind === "profile") {
+      const item = new vscode.TreeItem(
+        element.profile.name,
+        vscode.TreeItemCollapsibleState.None
+      );
+      item.description = element.active ? "active" : element.profile.type;
+      item.tooltip = element.profile.path;
+      item.contextValue = "sqlHelper.profile";
+      item.iconPath = new vscode.ThemeIcon(element.profile.type === "sqlite" ? "database" : "symbol-namespace");
+      item.command = {
+        command: "sqlHelper.selectProfileNode",
+        title: "Activate Profile",
+        arguments: [element.profile.id]
+      };
+      return item;
+    }
+
+    if (element.kind === "table") {
+      const item = new vscode.TreeItem(element.table.name, vscode.TreeItemCollapsibleState.Collapsed);
+      item.description = `${element.table.columns.length} cols`;
+      item.tooltip = element.table.createSql || element.table.name;
+      item.contextValue = "sqlHelper.table";
+      item.iconPath = new vscode.ThemeIcon("table");
+      item.command = {
+        command: "sqlHelper.previewTable",
+        title: "Preview Table",
+        arguments: [element.table.name]
+      };
+      return item;
+    }
+
+    if (element.kind === "column") {
+      const item = new vscode.TreeItem(element.column.name, vscode.TreeItemCollapsibleState.None);
+      item.description = element.column.type || "TEXT";
+      item.contextValue = "sqlHelper.column";
+      item.iconPath = new vscode.ThemeIcon(element.column.primaryKey ? "key" : "symbol-field");
+      item.tooltip = `${element.tableName}.${element.column.name}`;
+      return item;
+    }
+
+    const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
+    item.command = {
+      command: element.command,
+      title: element.label
+    };
+    item.description = element.description;
+    item.contextValue = "sqlHelper.action";
+    item.iconPath = new vscode.ThemeIcon(element.icon);
+    return item;
+  }
 }
 
 function getPreviewProvider(): MemoryDocumentProvider {
