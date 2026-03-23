@@ -42,12 +42,8 @@
         "title": "SQL Helper: Refresh Explorer"
       },
       {
-        "command": "sqlHelper.renameProfileNode",
-        "title": "SQL Helper: Rename Database"
-      },
-      {
         "command": "sqlHelper.deleteProfileNode",
-        "title": "SQL Helper: Delete Database"
+        "title": "SQL Helper: Remove Database Record"
       },
       {
         "command": "sqlHelper.renameTableNode",
@@ -61,14 +57,9 @@
     "menus": {
       "view/item/context": [
         {
-          "command": "sqlHelper.renameProfileNode",
-          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
-          "group": "inline"
-        },
-        {
           "command": "sqlHelper.deleteProfileNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
-          "group": "inline@2"
+          "group": "inline"
         },
         {
           "command": "sqlHelper.renameTableNode",
