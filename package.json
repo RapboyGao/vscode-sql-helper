@@ -12,7 +12,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:sqlHelper.openAnalyzer"
+    "onCommand:sqlHelper.openAnalyzer",
+    "onCustomEditor:sqlHelper.sqliteViewer",
+    "onLanguage:sql"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -20,6 +22,27 @@
       {
         "command": "sqlHelper.openAnalyzer",
         "title": "SQL Helper: Open Analyzer"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "sqlHelper.sqliteViewer",
+        "displayName": "SQL Helper SQLite Viewer",
+        "selector": [
+          {
+            "filenamePattern": "*.sqlite"
+          },
+          {
+            "filenamePattern": "*.sqlite3"
+          },
+          {
+            "filenamePattern": "*.db"
+          },
+          {
+            "filenamePattern": "*.db3"
+          }
+        ],
+        "priority": "default"
       }
     ]
   },
