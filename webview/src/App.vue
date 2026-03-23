@@ -272,6 +272,7 @@ onMounted(() => {
 
     if (type === "profilesUpdated") {
       const state = {
+        host: host.value,
         profiles: (payload?.profiles ?? []) as DatabaseProfile[],
         activeProfileId: (payload?.activeProfileId ?? null) as string | null,
         openedFile: openedFile.value,
