@@ -79,18 +79,29 @@ type CachedSchemaEntry = {
   schema: SqliteSchema;
 };
 
+type PreviewPanelState = {
+  title: string;
+  databasePath: string;
+  sourceSql: string;
+  page: number;
+  pageSize: number;
+  totalRows: number | null;
+  rows: Record<string, unknown>[];
+  columns: string[];
+  warning?: string;
+};
+
 const PROFILE_STORAGE_KEY = "sqlHelper.databaseProfiles";
 const ACTIVE_PROFILE_KEY = "sqlHelper.activeProfileId";
 const SQLITE_EXTENSIONS = new Set([".sqlite", ".sqlite3", ".db", ".db3"]);
 const SCHEMA_SCHEME = "sql-helper-schema";
-const PREVIEW_SCHEME = "sql-helper-preview";
 const QUERY_SCHEME = "sql-helper-query";
 const DIAGNOSTIC_TABLE_CODE = "sqlHelper.missingTable";
 const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 const DIAGNOSTIC_DEBOUNCE_MS = 180;
+const PREVIEW_PAGE_SIZE = 30;
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
-let sqlHelperPreviewProvider: MemoryDocumentProvider | null = null;
 let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
 let sqlHelperExplorerProvider: SqlHelperExplorerProvider | null = null;
 const sqliteSchemaCache = new Map<string, CachedSchemaEntry>();
@@ -101,9 +112,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("sqlHelper");
   sqlHelperDiagnostics = diagnostics;
   const schemaProvider = new MemoryDocumentProvider();
-  const previewProvider = new MemoryDocumentProvider();
   const queryProvider = new MemoryDocumentProvider();
-  sqlHelperPreviewProvider = previewProvider;
   sqlHelperQueryProvider = queryProvider;
   const explorerProvider = new SqlHelperExplorerProvider(context);
   sqlHelperExplorerProvider = explorerProvider;
@@ -111,7 +120,6 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     diagnostics,
     vscode.workspace.registerTextDocumentContentProvider(SCHEMA_SCHEME, schemaProvider),
-    vscode.workspace.registerTextDocumentContentProvider(PREVIEW_SCHEME, previewProvider),
     vscode.workspace.registerTextDocumentContentProvider(QUERY_SCHEME, queryProvider),
     vscode.commands.registerCommand("sqlHelper.openAnalyzer", async () => {
       const panel = vscode.window.createWebviewPanel("sqlHelperAnalyzer", "SQL Helper", vscode.ViewColumn.One, {
@@ -122,10 +130,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await configureWebview(context, panel.webview, undefined, "panel");
     }),
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
-      await previewTable(context, previewProvider, tableName);
+      await previewTable(context, tableName);
     }),
     vscode.commands.registerCommand("sqlHelper.previewQuery", async () => {
-      await previewQuery(context, queryProvider);
+      await previewQuery(context);
     }),
     vscode.commands.registerCommand("sqlHelper.explainQuery", async () => {
       await explainQuery(context, queryProvider);
@@ -316,12 +324,12 @@ async function configureWebview(
     }
 
     if (message.type === "previewTable") {
-      await previewTable(context, getPreviewProvider(), message.tableName);
+      await previewTable(context, message.tableName);
       return;
     }
 
     if (message.type === "previewQuery") {
-      await previewQuery(context, getQueryProvider());
+      await previewQuery(context);
       return;
     }
 
@@ -525,14 +533,6 @@ class SqlHelperExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>
     item.iconPath = new vscode.ThemeIcon(element.icon);
     return item;
   }
-}
-
-function getPreviewProvider(): MemoryDocumentProvider {
-  if (!sqlHelperPreviewProvider) {
-    sqlHelperPreviewProvider = new MemoryDocumentProvider();
-  }
-
-  return sqlHelperPreviewProvider;
 }
 
 function getQueryProvider(): MemoryDocumentProvider {
@@ -758,6 +758,13 @@ async function runSqliteJson<T>(databasePath: string, sql: string): Promise<T[]>
   });
 
   return JSON.parse(stdout) as T[];
+}
+
+async function runSqliteCount(databasePath: string, sql: string): Promise<number | null> {
+  const rows = await runSqliteJson<Record<string, unknown>>(databasePath, sql);
+  const value = rows[0] ? Object.values(rows[0])[0] : null;
+  const count = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(count) ? count : null;
 }
 
 function quoteSqliteIdentifier(identifier: string): string {
@@ -1086,7 +1093,6 @@ function toColumnCompletionItem(table: SqliteTable, column: SqliteTableColumn): 
 
 async function previewTable(
   context: vscode.ExtensionContext,
-  provider: MemoryDocumentProvider,
   explicitTableName?: string
 ): Promise<void> {
   const schema = await getActiveSqliteSchema(context);
@@ -1106,24 +1112,34 @@ async function previewTable(
     return;
   }
 
-  const rows = await runSqliteJson<Record<string, unknown>>(
-    schema.path,
-    `SELECT * FROM ${quoteSqliteIdentifier(tableName)} LIMIT 20;`
+  const panel = vscode.window.createWebviewPanel(
+    "sqlHelperTablePreview",
+    `Preview: ${tableName}`,
+    vscode.ViewColumn.Beside,
+    {
+      enableScripts: true,
+      retainContextWhenHidden: true
+    }
   );
-  const uri = vscode.Uri.parse(
-    `${PREVIEW_SCHEME}:/${encodeURIComponent(tableName)}.md?db=${encodeURIComponent(schema.path)}`
-  );
-  provider.set(uri, renderQueryResultDocument(`Preview: ${tableName}`, schema.path, `SELECT * FROM ${tableName} LIMIT 20;`, rows));
 
-  const document = await vscode.workspace.openTextDocument(uri);
-  await vscode.window.showTextDocument(document, {
-    preview: false,
-    viewColumn: vscode.ViewColumn.Beside
+  const pageSql = (page: number) =>
+    `SELECT * FROM ${quoteSqliteIdentifier(tableName)} LIMIT ${PREVIEW_PAGE_SIZE} OFFSET ${page * PREVIEW_PAGE_SIZE};`;
+  const totalRows = await runSqliteCount(
+    schema.path,
+    `SELECT COUNT(*) AS total FROM ${quoteSqliteIdentifier(tableName)};`
+  );
+
+  await openPreviewPanel(panel, {
+    title: `Preview: ${tableName}`,
+    databasePath: schema.path,
+    sourceSql: `SELECT * FROM ${quoteSqliteIdentifier(tableName)};`,
+    totalRows,
+    loadPage: async (page) => runSqliteJson<Record<string, unknown>>(schema.path, pageSql(page))
   });
 }
 
-async function previewQuery(context: vscode.ExtensionContext, provider: MemoryDocumentProvider): Promise<void> {
-  await runQueryCommand(context, provider, false);
+async function previewQuery(context: vscode.ExtensionContext): Promise<void> {
+  await runQueryCommand(context, false);
 }
 
 async function explainQuery(context: vscode.ExtensionContext, provider: MemoryDocumentProvider): Promise<void> {
@@ -1132,9 +1148,11 @@ async function explainQuery(context: vscode.ExtensionContext, provider: MemoryDo
 
 async function runQueryCommand(
   context: vscode.ExtensionContext,
-  provider: MemoryDocumentProvider,
-  explain: boolean
+  explainOrProvider: boolean | MemoryDocumentProvider,
+  maybeExplain?: boolean
 ): Promise<void> {
+  const explain = typeof explainOrProvider === "boolean" ? explainOrProvider : Boolean(maybeExplain);
+  const provider = typeof explainOrProvider === "boolean" ? null : explainOrProvider;
   const schema = await getActiveSqliteSchema(context);
 
   if (!schema) {
@@ -1155,6 +1173,45 @@ async function runQueryCommand(
   if (!sql) {
     void vscode.window.showWarningMessage("No SQL text available.");
     return;
+  }
+
+  if (!explain) {
+    const panel = vscode.window.createWebviewPanel(
+      "sqlHelperQueryPreview",
+      "Query Preview",
+      vscode.ViewColumn.Beside,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true
+      }
+    );
+
+    const countSql = `SELECT COUNT(*) AS total FROM (${sql}) AS ${quoteSqliteIdentifier("_sql_helper_count")};`;
+    const pageSql = (page: number) =>
+      `SELECT * FROM (${sql}) AS ${quoteSqliteIdentifier("_sql_helper_preview")} LIMIT ${PREVIEW_PAGE_SIZE} OFFSET ${page * PREVIEW_PAGE_SIZE};`;
+
+    let totalRows: number | null = null;
+    let warning: string | undefined;
+
+    try {
+      totalRows = await runSqliteCount(schema.path, countSql);
+    } catch (error) {
+      warning = error instanceof Error ? error.message : String(error);
+    }
+
+    await openPreviewPanel(panel, {
+      title: "Query Preview",
+      databasePath: schema.path,
+      sourceSql: sql,
+      totalRows,
+      warning,
+      loadPage: async (page) => runSqliteJson<Record<string, unknown>>(schema.path, pageSql(page))
+    });
+    return;
+  }
+
+  if (!provider) {
+    throw new Error("Explain query requires a document provider.");
   }
 
   const commandSql = explain ? `EXPLAIN QUERY PLAN ${sql}` : sql;
@@ -1550,6 +1607,254 @@ function findClosestNames(target: string, candidates: string[]): string[] {
     .map((entry) => entry.candidate);
 }
 
+async function openPreviewPanel(
+  panel: vscode.WebviewPanel,
+  options: {
+    title: string;
+    databasePath: string;
+    sourceSql: string;
+    totalRows: number | null;
+    warning?: string;
+    loadPage: (page: number) => Promise<Record<string, unknown>[]>;
+  }
+): Promise<void> {
+  const renderPage = async (page: number) => {
+    try {
+      const safePage = Math.max(0, page);
+      const rows = await options.loadPage(safePage);
+      const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+      const state: PreviewPanelState = {
+        title: options.title,
+        databasePath: options.databasePath,
+        sourceSql: options.sourceSql,
+        page: safePage,
+        pageSize: PREVIEW_PAGE_SIZE,
+        totalRows: options.totalRows,
+        rows,
+        columns,
+        warning: options.warning
+      };
+      panel.webview.html = renderPreviewPanelHtml(panel.webview, state);
+    } catch (error) {
+      const state: PreviewPanelState = {
+        title: options.title,
+        databasePath: options.databasePath,
+        sourceSql: options.sourceSql,
+        page: Math.max(0, page),
+        pageSize: PREVIEW_PAGE_SIZE,
+        totalRows: options.totalRows,
+        rows: [],
+        columns: [],
+        warning: error instanceof Error ? error.message : String(error)
+      };
+      panel.webview.html = renderPreviewPanelHtml(panel.webview, state);
+    }
+  };
+
+  panel.webview.onDidReceiveMessage(async (message: { type?: string; page?: number }) => {
+    if (message.type !== "page") {
+      return;
+    }
+
+    await renderPage(message.page ?? 0);
+  });
+
+  await renderPage(0);
+}
+
+function renderPreviewPanelHtml(webview: vscode.Webview, state: PreviewPanelState): string {
+  const totalPages = state.totalRows === null ? null : Math.max(1, Math.ceil(state.totalRows / state.pageSize));
+  const canGoPrev = state.page > 0;
+  const canGoNext = totalPages === null ? state.rows.length === state.pageSize : state.page + 1 < totalPages;
+  const startRow = state.rows.length === 0 ? 0 : state.page * state.pageSize + 1;
+  const endRow = state.page * state.pageSize + state.rows.length;
+  const nonce = String(Date.now());
+  const headerCells = state.columns.map((column) => `<th>${escapeHtml(column)}</th>`).join("");
+  const bodyRows = state.rows.length
+    ? state.rows
+        .map((row) => {
+          const cells = state.columns
+            .map((column) => `<td title="${escapeHtml(formatCellValue(row[column]))}">${escapeHtml(formatCellValue(row[column]))}</td>`)
+            .join("");
+          return `<tr>${cells}</tr>`;
+        })
+        .join("")
+    : `<tr><td colspan="${Math.max(state.columns.length, 1)}" class="empty-cell">No rows returned on this page.</td></tr>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(state.title)}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: var(--vscode-editor-background);
+      --panel: color-mix(in srgb, var(--vscode-sideBar-background) 72%, transparent);
+      --border: var(--vscode-panel-border);
+      --fg: var(--vscode-editor-foreground);
+      --muted: var(--vscode-descriptionForeground);
+      --accent: var(--vscode-focusBorder);
+      --badge: color-mix(in srgb, var(--vscode-badge-background) 80%, transparent);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--vscode-font-family);
+      color: var(--fg);
+      background:
+        radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 18%, transparent), transparent 28%),
+        linear-gradient(180deg, color-mix(in srgb, var(--bg) 92%, black 8%), var(--bg));
+      min-height: 100vh;
+    }
+    .shell {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 12px;
+      padding: 16px;
+      min-height: 100vh;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+      border-radius: 14px;
+      backdrop-filter: blur(16px);
+      overflow: hidden;
+    }
+    .hero {
+      padding: 16px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+    .meta, .warning, .sql {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--badge);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 0 18px 16px;
+    }
+    button {
+      border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+      background: color-mix(in srgb, var(--panel) 82%, transparent);
+      color: var(--fg);
+      padding: 8px 12px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .sql {
+      padding: 0 18px 16px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .warning {
+      margin: 0 18px 16px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid color-mix(in srgb, var(--vscode-editorWarning-foreground) 45%, transparent);
+      background: color-mix(in srgb, var(--vscode-editorWarning-foreground) 12%, transparent);
+      color: var(--fg);
+    }
+    .table-wrap {
+      overflow: auto;
+      max-height: calc(100vh - 220px);
+    }
+    table {
+      width: max-content;
+      min-width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 12px;
+    }
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: color-mix(in srgb, var(--bg) 88%, black 12%);
+      text-align: left;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+      border-right: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+      white-space: nowrap;
+      max-width: 320px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    tr:nth-child(even) td {
+      background: color-mix(in srgb, var(--panel) 55%, transparent);
+    }
+    .empty-cell {
+      text-align: center;
+      color: var(--muted);
+      padding: 36px 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="card">
+      <div class="hero">
+        <div>
+          <h1>${escapeHtml(state.title)}</h1>
+          <div class="meta">${escapeHtml(state.databasePath)}</div>
+        </div>
+        <div class="badge">
+          ${state.totalRows === null ? `Page ${state.page + 1}` : `${startRow}-${endRow} / ${state.totalRows}`}
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="prev" ${canGoPrev ? "" : "disabled"}>Previous</button>
+        <button id="next" ${canGoNext ? "" : "disabled"}>Next</button>
+        <span class="meta">${totalPages === null ? `Page ${state.page + 1}` : `Page ${state.page + 1} of ${totalPages}`}</span>
+      </div>
+      <div class="sql">${escapeHtml(state.sourceSql)}</div>
+      ${state.warning ? `<div class="warning">Count unavailable: ${escapeHtml(state.warning)}</div>` : ""}
+    </section>
+    <section class="card table-wrap">
+      <table>
+        <thead><tr>${headerCells || "<th>Result</th>"}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </section>
+  </div>
+  <script nonce="${nonce}">
+    const vscode = acquireVsCodeApi();
+    document.getElementById("prev")?.addEventListener("click", () => vscode.postMessage({ type: "page", page: ${state.page - 1} }));
+    document.getElementById("next")?.addEventListener("click", () => vscode.postMessage({ type: "page", page: ${state.page + 1} }));
+  </script>
+</body>
+</html>`;
+}
+
 function renderQueryResultDocument(
   title: string,
   databasePath: string,
@@ -1603,6 +1908,14 @@ function formatCellValue(value: unknown): string {
 
 function escapeMarkdownTableCell(value: string): string {
   return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;");
 }
 
 function levenshtein(left: string, right: string): number {

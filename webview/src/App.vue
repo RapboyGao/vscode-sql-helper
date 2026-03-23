@@ -428,11 +428,18 @@ onMounted(() => {
     <section class="hero">
       <div class="hero-copy">
         <p class="eyebrow">SQL Helper</p>
-        <h1>Remember database context and open SQLite files as a proper tool view.</h1>
+        <h1>Dark SQL workspace for context, validation, and live SQLite inspection.</h1>
         <p class="subtitle">
-          Saved database profiles persist across sessions, and SQLite files opened from the
-          workspace are attached automatically.
+          Keep one database active, inspect schema structure, and validate SQL against the current
+          SQLite target without leaving the editor.
         </p>
+        <div class="hero-actions">
+          <button type="button" :disabled="pending" @click="analyze">
+            {{ pending ? "Analyzing..." : "Analyze SQL" }}
+          </button>
+          <button type="button" class="button-secondary" @click="previewQuery">Preview Query</button>
+          <button type="button" class="button-ghost" @click="explainQuery">Explain Plan</button>
+        </div>
         <div v-if="openedFile" class="opened-file">
           <span class="opened-file-label">Opened file</span>
           <strong>{{ openedFile.name }}</strong>
@@ -467,9 +474,9 @@ onMounted(() => {
             <p class="panel-kicker">Query Input</p>
             <h2>SQL source</h2>
           </div>
-          <button type="button" :disabled="pending" @click="analyze">
-            {{ pending ? "Analyzing..." : "Analyze SQL" }}
-          </button>
+          <span class="status-pill" :class="{ active: pending }">
+            {{ pending ? "Parser busy" : "Ready to analyze" }}
+          </span>
         </div>
 
         <label for="sql">Paste or edit the statement</label>
@@ -524,6 +531,14 @@ onMounted(() => {
 
         <div class="actions-row">
           <button type="button" class="button-secondary" @click="saveProfile">Save Profile</button>
+          <button
+            v-if="sqliteSchema?.tables.length"
+            type="button"
+            class="button-ghost"
+            @click="previewTable(sqliteSchema.tables[0].name)"
+          >
+            Preview First Table
+          </button>
           <span v-if="profileMessage" class="mini-note">{{ profileMessage }}</span>
         </div>
 
