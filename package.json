@@ -64,12 +64,12 @@
         {
           "command": "sqlHelper.renameTableNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
-          "group": "inline"
+          "group": "modification"
         },
         {
           "command": "sqlHelper.deleteTableNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
-          "group": "inline@2"
+          "group": "modification@2"
         }
       ]
     },

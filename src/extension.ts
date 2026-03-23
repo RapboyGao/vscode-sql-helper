@@ -165,37 +165,6 @@ export function activate(context: vscode.ExtensionContext): void {
       await explorerProvider.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
-    vscode.commands.registerCommand("sqlHelper.renameProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
-      const profile = resolveProfileArgument(context, profileIdOrNode);
-
-      if (!profile) {
-        return;
-      }
-
-      const nextName = await vscode.window.showInputBox({
-        title: "Rename database",
-        prompt: "Change the display name used in SQL Helper",
-        value: profile.name,
-        validateInput: (value) => value.trim() ? null : "Name is required."
-      });
-
-      if (!nextName || nextName.trim() === profile.name) {
-        return;
-      }
-
-      const profiles = getProfiles(context).map((entry) =>
-        entry.id === profile.id
-          ? {
-              ...entry,
-              name: nextName.trim(),
-              lastUsedAt: new Date().toISOString()
-            }
-          : entry
-      );
-
-      await context.globalState.update(PROFILE_STORAGE_KEY, profiles);
-      await explorerProvider.refresh();
-    }),
     vscode.commands.registerCommand("sqlHelper.deleteProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
       const profile = resolveProfileArgument(context, profileIdOrNode);
 
@@ -204,12 +173,12 @@ export function activate(context: vscode.ExtensionContext): void {
       }
 
       const confirmed = await vscode.window.showWarningMessage(
-        `Delete saved database "${profile.name}"?`,
+        `Remove "${profile.name}" from SQL Helper saved databases? The SQLite file itself will not be deleted.`,
         { modal: true },
-        "Delete"
+        "Remove"
       );
 
-      if (confirmed !== "Delete") {
+      if (confirmed !== "Remove") {
         return;
       }
 
