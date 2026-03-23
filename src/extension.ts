@@ -23,6 +23,7 @@ type WebviewState = {
   host: "panel" | "sidebar";
   profiles: DatabaseProfile[];
   activeProfileId: string | null;
+  selectedTableName: string | null;
   openedFile: {
     path: string;
     name: string;
@@ -134,6 +135,7 @@ type PreviewPanelState = {
 
 const PROFILE_STORAGE_KEY = "sqlHelper.databaseProfiles";
 const ACTIVE_PROFILE_KEY = "sqlHelper.activeProfileId";
+const SELECTED_TABLE_KEY = "sqlHelper.selectedTableName";
 const SQLITE_EXTENSIONS = new Set([".sqlite", ".sqlite3", ".db", ".db3"]);
 const SCHEMA_SCHEME = "sql-helper-schema";
 const QUERY_SCHEME = "sql-helper-query";
@@ -174,6 +176,49 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
       await previewTable(context, tableName);
     }),
+    vscode.commands.registerCommand("sqlHelper.openProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
+      const profile = resolveProfileArgument(context, profileIdOrNode);
+
+      if (!profile || profile.type !== "sqlite") {
+        return;
+      }
+
+      await context.globalState.update(ACTIVE_PROFILE_KEY, profile.id);
+      await context.globalState.update(SELECTED_TABLE_KEY, null);
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        vscode.Uri.file(profile.path),
+        "sqlHelper.sqliteViewer",
+        {
+          viewColumn: vscode.ViewColumn.Active,
+          preview: false
+        }
+      );
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+    }),
+    vscode.commands.registerCommand("sqlHelper.openTableNode", async (tableOrNode?: string | ExplorerNode) => {
+      const table = resolveTableArgument(tableOrNode);
+      const activeProfileId = context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null);
+      const activeProfile = activeProfileId
+        ? getProfiles(context).find((profile) => profile.id === activeProfileId) ?? null
+        : null;
+
+      if (!table || !activeProfile || activeProfile.type !== "sqlite") {
+        return;
+      }
+
+      await context.globalState.update(SELECTED_TABLE_KEY, table.name);
+      await vscode.commands.executeCommand(
+        "vscode.openWith",
+        vscode.Uri.file(activeProfile.path),
+        "sqlHelper.sqliteViewer",
+        {
+          viewColumn: vscode.ViewColumn.Active,
+          preview: false
+        }
+      );
+    }),
     vscode.commands.registerCommand("sqlHelper.previewQuery", async () => {
       await previewQuery(context);
     }),
@@ -209,6 +254,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
       if (activeProfileId === profile.id) {
         await context.globalState.update(ACTIVE_PROFILE_KEY, nextProfiles[0]?.id ?? null);
+        await context.globalState.update(SELECTED_TABLE_KEY, null);
         await refreshDiagnosticsForOpenSqlDocuments(context);
       }
 
@@ -259,6 +305,7 @@ export function activate(context: vscode.ExtensionContext): void {
         `CREATE TABLE ${quoteSqliteIdentifier(tableName.trim())} ("id" INTEGER PRIMARY KEY AUTOINCREMENT);`
       );
       invalidateSchemaCache(profile.path);
+      await context.globalState.update(SELECTED_TABLE_KEY, tableName.trim());
 
       if (context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null) !== profile.id) {
         await context.globalState.update(ACTIVE_PROFILE_KEY, profile.id);
@@ -316,6 +363,9 @@ export function activate(context: vscode.ExtensionContext): void {
         activeSchema.path,
         `ALTER TABLE ${quoteSqliteIdentifier(table.name)} RENAME TO ${quoteSqliteIdentifier(nextName.trim())};`
       );
+      if (context.globalState.get<string | null>(SELECTED_TABLE_KEY, null) === table.name) {
+        await context.globalState.update(SELECTED_TABLE_KEY, nextName.trim());
+      }
       invalidateSchemaCache(activeSchema.path);
       await explorerProvider.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
@@ -342,6 +392,9 @@ export function activate(context: vscode.ExtensionContext): void {
         activeSchema.path,
         `DROP TABLE ${quoteSqliteIdentifier(table.name)};`
       );
+      if (context.globalState.get<string | null>(SELECTED_TABLE_KEY, null) === table.name) {
+        await context.globalState.update(SELECTED_TABLE_KEY, null);
+      }
       invalidateSchemaCache(activeSchema.path);
       await explorerProvider.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
@@ -759,9 +812,9 @@ class SqlHelperExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>
       item.contextValue = "sqlHelper.profile";
       item.iconPath = new vscode.ThemeIcon(element.profile.type === "sqlite" ? "database" : "symbol-namespace");
       item.command = {
-        command: "sqlHelper.selectProfileNode",
-        title: "Activate Profile",
-        arguments: [element.profile.id]
+        command: element.profile.type === "sqlite" ? "sqlHelper.openProfileNode" : "sqlHelper.selectProfileNode",
+        title: element.profile.type === "sqlite" ? "Open Database" : "Activate Profile",
+        arguments: [element]
       };
       return item;
     }
@@ -773,9 +826,9 @@ class SqlHelperExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>
       item.contextValue = "sqlHelper.table";
       item.iconPath = new vscode.ThemeIcon("table");
       item.command = {
-        command: "sqlHelper.previewTable",
-        title: "Preview Table",
-        arguments: [element.table.name]
+        command: "sqlHelper.openTableNode",
+        title: "Open Table",
+        arguments: [element]
       };
       return item;
     }
@@ -884,6 +937,7 @@ async function getWebviewState(
     host,
     profiles: getProfiles(context),
     activeProfileId: context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null),
+    selectedTableName: context.globalState.get<string | null>(SELECTED_TABLE_KEY, null),
     openedFile: openedFile
       ? {
           path: openedFile.fsPath,

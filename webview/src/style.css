@@ -667,23 +667,7 @@ button:disabled {
   margin-top: 4px;
 }
 
-.table-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 16px;
-}
-
-.compact-metric {
-  min-height: 0;
-}
-
-.compact-metric strong {
-  font-size: 32px;
-}
-
-.studio-data-panel,
-.studio-hero {
+.studio-data-panel {
   overflow: hidden;
 }
 
@@ -797,8 +781,7 @@ button:disabled {
   .hero-metrics,
   .reference-grid,
   .validation-grid,
-  .field-grid,
-  .table-summary-grid {
+  .field-grid {
     grid-template-columns: 1fr;
   }
 
