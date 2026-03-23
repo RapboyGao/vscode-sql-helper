@@ -15,7 +15,8 @@
   "activationEvents": [
     "onCommand:sqlHelper.openAnalyzer",
     "onCustomEditor:sqlHelper.sqliteViewer",
-    "onLanguage:sql"
+    "onLanguage:sql",
+    "onView:sqlHelper.sidebarView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -37,6 +38,24 @@
         "title": "SQL Helper: Explain Current SQL Query"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sqlHelper",
+          "title": "SQL Helper",
+          "icon": "media/sql-helper.svg"
+        }
+      ]
+    },
+    "views": {
+      "sqlHelper": [
+        {
+          "id": "sqlHelper.sidebarView",
+          "name": "Analyzer",
+          "type": "webview"
+        }
+      ]
+    },
     "customEditors": [
       {
         "viewType": "sqlHelper.sqliteViewer",

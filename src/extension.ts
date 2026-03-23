@@ -20,6 +20,7 @@ type DatabaseProfile = {
 };
 
 type WebviewState = {
+  host: "panel" | "sidebar";
   profiles: DatabaseProfile[];
   activeProfileId: string | null;
   openedFile: {
@@ -35,7 +36,11 @@ type WebviewMessage =
   | { type: "analyze"; sql?: string }
   | { type: "saveProfile"; payload?: SaveProfileInput }
   | { type: "selectProfile"; profileId?: string | null }
-  | { type: "refreshSchema" };
+  | { type: "refreshSchema" }
+  | { type: "previewTable"; tableName?: string }
+  | { type: "previewQuery" }
+  | { type: "explainQuery" }
+  | { type: "openAnalyzer" };
 
 type SaveProfileInput = {
   id?: string;
@@ -79,6 +84,8 @@ const DIAGNOSTIC_TABLE_CODE = "sqlHelper.missingTable";
 const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
+let sqlHelperPreviewProvider: MemoryDocumentProvider | null = null;
+let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
 
 export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("sqlHelper");
@@ -86,6 +93,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const schemaProvider = new MemoryDocumentProvider();
   const previewProvider = new MemoryDocumentProvider();
   const queryProvider = new MemoryDocumentProvider();
+  sqlHelperPreviewProvider = previewProvider;
+  sqlHelperQueryProvider = queryProvider;
+  const sidebarProvider = new SqlHelperSidebarProvider(context);
 
   context.subscriptions.push(
     diagnostics,
@@ -98,7 +108,7 @@ export function activate(context: vscode.ExtensionContext): void {
         localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist", "webview")]
       });
 
-      await configureWebview(context, panel.webview, undefined);
+      await configureWebview(context, panel.webview, undefined, "panel");
     }),
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
       await previewTable(context, previewProvider, tableName);
@@ -108,6 +118,11 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("sqlHelper.explainQuery", async () => {
       await explainQuery(context, queryProvider);
+    }),
+    vscode.window.registerWebviewViewProvider("sqlHelper.sidebarView", sidebarProvider, {
+      webviewOptions: {
+        retainContextWhenHidden: true
+      }
     }),
     vscode.window.registerCustomEditorProvider(
       "sqlHelper.sqliteViewer",
@@ -192,14 +207,28 @@ class SqliteViewerProvider implements vscode.CustomReadonlyEditorProvider {
     _token: vscode.CancellationToken
   ): Promise<void> {
     webviewPanel.title = `SQL Helper · ${path.basename(document.uri.fsPath)}`;
-    await configureWebview(this.context, webviewPanel.webview, document.uri);
+    await configureWebview(this.context, webviewPanel.webview, document.uri, "panel");
+  }
+}
+
+class SqlHelperSidebarProvider implements vscode.WebviewViewProvider {
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  async resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ): Promise<void> {
+    webviewView.title = "SQL Helper";
+    await configureWebview(this.context, webviewView.webview, undefined, "sidebar");
   }
 }
 
 async function configureWebview(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,
-  openedFile: vscode.Uri | undefined
+  openedFile: vscode.Uri | undefined,
+  host: "panel" | "sidebar"
 ): Promise<void> {
   webview.options = {
     enableScripts: true,
@@ -212,7 +241,7 @@ async function configureWebview(
       await ensureSqliteProfileForFile(context, openedFile);
       webview.postMessage({
         type: "init",
-        payload: await getWebviewState(context, openedFile)
+        payload: await getWebviewState(context, openedFile, host)
       });
       return;
     }
@@ -272,7 +301,42 @@ async function configureWebview(
         webview.postMessage({ type: "schemaError", payload: text });
       }
     }
+
+    if (message.type === "previewTable") {
+      await previewTable(context, getPreviewProvider(), message.tableName);
+      return;
+    }
+
+    if (message.type === "previewQuery") {
+      await previewQuery(context, getQueryProvider());
+      return;
+    }
+
+    if (message.type === "explainQuery") {
+      await explainQuery(context, getQueryProvider());
+      return;
+    }
+
+    if (message.type === "openAnalyzer") {
+      await vscode.commands.executeCommand("sqlHelper.openAnalyzer");
+    }
   });
+}
+
+function getPreviewProvider(): MemoryDocumentProvider {
+  if (!sqlHelperPreviewProvider) {
+    sqlHelperPreviewProvider = new MemoryDocumentProvider();
+  }
+
+  return sqlHelperPreviewProvider;
+}
+
+function getQueryProvider(): MemoryDocumentProvider {
+  if (!sqlHelperQueryProvider) {
+    sqlHelperQueryProvider = new MemoryDocumentProvider();
+  }
+
+  return sqlHelperQueryProvider;
 }
 
 async function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): Promise<string> {
@@ -291,9 +355,11 @@ function getProfiles(context: vscode.ExtensionContext): DatabaseProfile[] {
 
 async function getWebviewState(
   context: vscode.ExtensionContext,
-  openedFile: vscode.Uri | undefined
+  openedFile: vscode.Uri | undefined,
+  host: "panel" | "sidebar"
 ): Promise<WebviewState> {
   return {
+    host,
     profiles: getProfiles(context),
     activeProfileId: context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null),
     openedFile: openedFile

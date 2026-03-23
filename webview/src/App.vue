@@ -20,6 +20,7 @@ type DatabaseProfile = {
 };
 
 type InitState = {
+  host: "panel" | "sidebar";
   profiles: DatabaseProfile[];
   activeProfileId: string | null;
   openedFile: {
@@ -64,6 +65,7 @@ const sql = ref("SELECT * FROM analytics.sales.orders o JOIN warehouse.dim_users
 const result = ref<AnalysisResult | null>(null);
 const error = ref("");
 const pending = ref(false);
+const host = ref<InitState["host"]>("panel");
 const profiles = ref<DatabaseProfile[]>([]);
 const activeProfileId = ref<string | null>(null);
 const openedFile = ref<InitState["openedFile"]>(null);
@@ -81,6 +83,8 @@ const activeProfile = computed(() => {
 
   return profiles.value.find((profile) => profile.id === activeProfileId.value) ?? null;
 });
+
+const isSidebar = computed(() => host.value === "sidebar");
 
 const schemaInsights = computed(() => {
   if (!sqliteSchema.value) {
@@ -179,6 +183,31 @@ function analyze(): void {
   });
 }
 
+function previewTable(tableName: string): void {
+  vscode?.postMessage({
+    type: "previewTable",
+    tableName
+  });
+}
+
+function previewQuery(): void {
+  vscode?.postMessage({
+    type: "previewQuery"
+  });
+}
+
+function explainQuery(): void {
+  vscode?.postMessage({
+    type: "explainQuery"
+  });
+}
+
+function openAnalyzer(): void {
+  vscode?.postMessage({
+    type: "openAnalyzer"
+  });
+}
+
 function selectProfile(profileId: string): void {
   activeProfileId.value = profileId || null;
   schemaPending.value = true;
@@ -211,6 +240,7 @@ function saveProfile(): void {
 }
 
 function applyState(state: InitState): void {
+  host.value = state.host;
   profiles.value = state.profiles;
   activeProfileId.value = state.activeProfileId;
   openedFile.value = state.openedFile;
@@ -290,9 +320,110 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="shell">
+  <main class="shell" :class="{ 'shell-sidebar': isSidebar }">
     <div class="ambient ambient-a" />
     <div class="ambient ambient-b" />
+
+    <template v-if="isSidebar">
+      <section class="sidebar-shell">
+        <div class="sidebar-hero panel">
+          <p class="eyebrow">SQL Helper</p>
+          <h2>Workspace Database Explorer</h2>
+          <p class="subtitle sidebar-subtitle">
+            Keep a SQLite database active, preview tables, and jump into the full analyzer only when needed.
+          </p>
+
+          <div class="sidebar-actions">
+            <button type="button" @click="openAnalyzer">Open Analyzer</button>
+            <button type="button" class="button-secondary" @click="previewQuery">Preview SQL</button>
+            <button type="button" class="button-secondary" @click="explainQuery">Explain</button>
+          </div>
+        </div>
+
+        <section class="panel sidebar-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="panel-kicker">Active Database</p>
+              <h2>{{ activeProfile?.name ?? "No active profile" }}</h2>
+            </div>
+            <span class="status-pill" :class="{ active: schemaPending }">
+              {{ schemaPending ? "Loading" : sqliteSchema ? `${sqliteSchema.tableCount} tables` : "Idle" }}
+            </span>
+          </div>
+
+          <select
+            id="sidebar-profile-select"
+            class="input"
+            :value="activeProfileId ?? ''"
+            @change="selectProfile(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">No active profile</option>
+            <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
+              {{ profile.name }} · {{ profile.type }}
+            </option>
+          </select>
+
+          <p v-if="activeProfile" class="sidebar-path">{{ activeProfile.path }}</p>
+          <p v-else class="empty">Choose a saved database or open a SQLite file from the workspace.</p>
+        </section>
+
+        <section class="panel sidebar-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="panel-kicker">Recent Databases</p>
+              <h2>Saved targets</h2>
+            </div>
+          </div>
+
+          <div v-if="profiles.length" class="sidebar-profile-list">
+            <button
+              v-for="profile in profiles"
+              :key="profile.id"
+              type="button"
+              class="sidebar-profile"
+              :class="{ active: profile.id === activeProfileId }"
+              @click="selectProfile(profile.id)"
+            >
+              <strong>{{ profile.name }}</strong>
+              <span>{{ profile.type }}</span>
+            </button>
+          </div>
+          <p v-else class="empty">No saved profiles yet.</p>
+        </section>
+
+        <section class="panel sidebar-panel">
+          <div class="panel-head compact">
+            <div>
+              <p class="panel-kicker">Schema Explorer</p>
+              <h2>Tables</h2>
+            </div>
+          </div>
+
+          <div v-if="sqliteSchema?.tables.length" class="sidebar-table-list">
+            <article v-for="table in sqliteSchema.tables" :key="table.name" class="sidebar-table-card">
+              <div class="sidebar-table-head">
+                <div>
+                  <strong>{{ table.name }}</strong>
+                  <span>{{ table.columns.length }} columns</span>
+                </div>
+                <button type="button" class="sidebar-link" @click="previewTable(table.name)">Preview</button>
+              </div>
+              <ul class="sidebar-column-list">
+                <li v-for="column in table.columns.slice(0, 6)" :key="`${table.name}:${column.name}`">
+                  <span>{{ column.name }}</span>
+                  <small>{{ column.type || "TEXT" }}</small>
+                </li>
+              </ul>
+            </article>
+          </div>
+          <p v-else class="empty">No schema loaded.</p>
+        </section>
+
+        <p v-if="error" class="error">{{ error }}</p>
+      </section>
+    </template>
+
+    <template v-else>
 
     <section class="hero">
       <div class="hero-copy">
@@ -551,5 +682,6 @@ onMounted(() => {
         </article>
       </div>
     </section>
+    </template>
   </main>
 </template>
