@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { ColumnSchemaDraft } from "../types";
 
-defineProps<{
+const props = defineProps<{
   structureDraft: ColumnSchemaDraft[];
   structureError: string;
   structurePending: boolean;
+  databaseType?: "sqlite" | "generic";
 }>();
 
 const emit = defineEmits<{
@@ -13,6 +15,24 @@ const emit = defineEmits<{
   reset: [];
   apply: [];
 }>();
+
+const TYPE_OPTIONS: Record<"sqlite" | "generic", string[]> = {
+  sqlite: ["INTEGER", "TEXT", "REAL", "BLOB", "NUMERIC", "BOOLEAN", "DATE", "DATETIME", "TIMESTAMP", "JSON"],
+  generic: ["INTEGER", "TEXT", "REAL", "BLOB", "NUMERIC"]
+};
+
+const databaseType = computed(() => props.databaseType ?? "sqlite");
+
+function typeOptionsFor(currentType: string): string[] {
+  const baseOptions = TYPE_OPTIONS[databaseType.value] ?? TYPE_OPTIONS.sqlite;
+  const normalizedCurrent = currentType.trim().toUpperCase();
+
+  if (!normalizedCurrent || baseOptions.includes(normalizedCurrent)) {
+    return baseOptions;
+  }
+
+  return [normalizedCurrent, ...baseOptions];
+}
 </script>
 
 <template>
@@ -37,7 +57,13 @@ const emit = defineEmits<{
         <tbody>
           <tr v-for="(column, index) in structureDraft" :key="`${column.sourceName}:${index}`">
             <td><input v-model="column.name" class="grid-input" type="text" /></td>
-            <td><input v-model="column.type" class="grid-input" type="text" placeholder="TEXT" /></td>
+            <td>
+              <select v-model="column.type" class="grid-input">
+                <option v-for="typeOption in typeOptionsFor(column.type)" :key="typeOption" :value="typeOption">
+                  {{ typeOption }}
+                </option>
+              </select>
+            </td>
             <td><input v-model="column.defaultValue" class="grid-input" type="text" placeholder="NULL / 'x' / 0" /></td>
             <td>
               <label class="checkbox-cell">
@@ -71,12 +97,14 @@ const emit = defineEmits<{
       </table>
     </div>
 
-    <div class="table-search-bar">
+    <div class="structure-footer">
       <button type="button" class="button-ghost" @click="emit('add-column')">Add Column</button>
-      <button type="button" class="button-ghost" @click="emit('reset')">Reset Changes</button>
-      <button type="button" class="button-secondary" :disabled="structurePending" @click="emit('apply')">
-        {{ structurePending ? "Applying..." : "Apply Structure" }}
-      </button>
+      <div class="structure-footer-actions">
+        <button type="button" class="button-ghost" @click="emit('reset')">Reset Changes</button>
+        <button type="button" class="button-secondary" :disabled="structurePending" @click="emit('apply')">
+          {{ structurePending ? "Applying..." : "Apply Structure" }}
+        </button>
+      </div>
     </div>
   </div>
 </template>

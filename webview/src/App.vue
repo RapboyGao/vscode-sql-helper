@@ -326,6 +326,19 @@ function applyStructure(): void {
   });
 }
 
+function exportDatabase(): void {
+  vscode?.postMessage({
+    type: "exportDatabase"
+  });
+}
+
+function exportTable(): void {
+  vscode?.postMessage({
+    type: "exportTable",
+    tableName: selectedTableName.value
+  });
+}
+
 function applyState(state: InitState): void {
   host.value = state.host;
   profiles.value = state.profiles;
@@ -497,7 +510,6 @@ onMounted(() => {
       @update:table-detail-tab="tableDetailTab = $event"
       @update:table-search="tableSearch = $event"
       @search="loadTableData(selectedTableName, 0, tableSearch)"
-      @clear="loadTableData(selectedTableName, 0, '')"
       @add-row="beginNewRow"
       @page="loadTableData(selectedTableName, $event, tableSearch)"
       @update-new-cell="updateNewRowDraft"
@@ -509,6 +521,8 @@ onMounted(() => {
       @delete-row="deleteRow"
       @add-column="addStructureColumn"
       @remove-column="removeStructureColumn"
+      @export-database="exportDatabase"
+      @export-table="exportTable"
       @reset-structure="resetStructureDraft"
       @apply-structure="applyStructure"
     />

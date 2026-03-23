@@ -26,6 +26,10 @@
         "title": "SQL Helper: Open Analyzer"
       },
       {
+        "command": "sqlHelper.addConnection",
+        "title": "SQL Helper: Add Connection"
+      },
+      {
         "command": "sqlHelper.previewTable",
         "title": "SQL Helper: Preview SQLite Table"
       },
@@ -56,6 +60,14 @@
       {
         "command": "sqlHelper.deleteTableNode",
         "title": "SQL Helper: Delete Table"
+      },
+      {
+        "command": "sqlHelper.exportDatabaseNode",
+        "title": "SQL Helper: Export Database"
+      },
+      {
+        "command": "sqlHelper.exportTableNode",
+        "title": "SQL Helper: Export Table"
       }
     ],
     "menus": {
@@ -71,6 +83,11 @@
           "group": "modification"
         },
         {
+          "command": "sqlHelper.exportDatabaseNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
+          "group": "export"
+        },
+        {
           "command": "sqlHelper.renameTableNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
           "group": "modification"
@@ -79,6 +96,11 @@
           "command": "sqlHelper.deleteTableNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
           "group": "modification@2"
+        },
+        {
+          "command": "sqlHelper.exportTableNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
+          "group": "export"
         }
       ]
     },
@@ -143,6 +165,7 @@
     "vue": "^3.5.13"
   },
   "dependencies": {
-    "node-sql-parser": "^5.4.0"
+    "node-sql-parser": "^5.4.0",
+    "xlsx": "^0.18.5"
   }
 }

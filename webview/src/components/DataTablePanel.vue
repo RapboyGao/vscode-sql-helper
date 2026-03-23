@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref, watch } from "vue";
 import PaginationBar from "./PaginationBar.vue";
 import type { SqliteTable, TableDataPayload, TableDataRow } from "../types";
 
@@ -17,7 +18,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   "update:tableSearch": [value: string];
   search: [];
-  clear: [];
   "add-row": [];
   page: [page: number];
   "update-new-cell": [columnName: string, value: string];
@@ -28,6 +28,52 @@ const emit = defineEmits<{
   "reset-row": [row: TableDataRow];
   "delete-row": [row: TableDataRow];
 }>();
+
+const SEARCH_DEBOUNCE_MS = 300;
+const localSearch = ref(props.tableSearch);
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(
+  () => props.tableSearch,
+  (value) => {
+    localSearch.value = value;
+  }
+);
+
+onBeforeUnmount(() => {
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+});
+
+function triggerSearch(nextValue: string, immediate = false): void {
+  emit("update:tableSearch", nextValue);
+
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+
+  if (immediate) {
+    emit("search");
+    return;
+  }
+
+  searchTimer = setTimeout(() => {
+    emit("search");
+    searchTimer = null;
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+function handleSearchInput(value: string): void {
+  localSearch.value = value;
+  triggerSearch(value);
+}
+
+function clearSearch(): void {
+  localSearch.value = "";
+  triggerSearch("", true);
+}
 
 function rowKeyId(row: TableDataRow): string {
   return JSON.stringify(row.rowKey);
@@ -117,16 +163,30 @@ function isRowDirty(row: TableDataRow): boolean {
 <template>
   <div class="table-tab-panel">
     <div class="table-search-bar">
-      <input
-        :value="tableSearch"
-        class="input search-input"
-        type="text"
-        placeholder="Fuzzy search current table"
-        @input="emit('update:tableSearch', ($event.target as HTMLInputElement).value)"
-        @keydown.enter.prevent="emit('search')"
-      />
-      <button type="button" class="button-secondary" @click="emit('search')">Search</button>
-      <button type="button" class="button-ghost" @click="emit('clear')">Clear</button>
+      <div class="search-input-wrap">
+        <input
+          :value="localSearch"
+          class="input search-input"
+          type="text"
+          placeholder="Fuzzy search current table"
+          @input="handleSearchInput(($event.target as HTMLInputElement).value)"
+          @keydown.enter.prevent="triggerSearch(localSearch, true)"
+        />
+        <button
+          v-if="localSearch"
+          type="button"
+          class="search-clear-button"
+          title="Clear search"
+          @click="clearSearch"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
+              fill="currentColor"
+            />
+          </svg>
+        </button>
+      </div>
       <button type="button" class="button-ghost" @click="emit('add-row')">Add Row</button>
     </div>
 

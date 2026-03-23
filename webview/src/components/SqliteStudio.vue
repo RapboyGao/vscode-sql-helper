@@ -36,7 +36,6 @@ const emit = defineEmits<{
   "update:tableDetailTab": [tab: "data" | "structure"];
   "update:tableSearch": [value: string];
   search: [];
-  clear: [];
   "add-row": [];
   page: [page: number];
   "update-new-cell": [columnName: string, value: string];
@@ -48,6 +47,8 @@ const emit = defineEmits<{
   "delete-row": [row: TableDataRow];
   "add-column": [];
   "remove-column": [index: number];
+  "export-database": [];
+  "export-table": [];
   "reset-structure": [];
   "apply-structure": [];
 }>();
@@ -64,7 +65,6 @@ const emit = defineEmits<{
       </div>
 
       <p class="schema-path">{{ sqliteSchema?.path ?? openedFile?.path }}</p>
-      <div class="status-badge">{{ sqliteSchema?.tableCount ?? 0 }} tables</div>
 
       <div class="table-list">
         <button
@@ -90,6 +90,21 @@ const emit = defineEmits<{
           <h2>{{ activeTable?.name ?? "Choose a table" }}</h2>
         </div>
         <div class="table-toolbar">
+          <button
+            type="button"
+            class="button-ghost"
+            @click="emit('export-database')"
+          >
+            Export DB
+          </button>
+          <button
+            type="button"
+            class="button-ghost"
+            :disabled="!activeTable"
+            @click="emit('export-table')"
+          >
+            Export Table
+          </button>
           <button
             type="button"
             class="tab-button"
@@ -122,7 +137,6 @@ const emit = defineEmits<{
         :row-save-pending="rowSavePending"
         @update:table-search="emit('update:tableSearch', $event)"
         @search="emit('search')"
-        @clear="emit('clear')"
         @add-row="emit('add-row')"
         @page="emit('page', $event)"
         @update-new-cell="(columnName, value) => emit('update-new-cell', columnName, value)"
@@ -139,6 +153,7 @@ const emit = defineEmits<{
         :structure-draft="structureDraft"
         :structure-error="structureError"
         :structure-pending="structurePending"
+        database-type="sqlite"
         @add-column="emit('add-column')"
         @remove-column="emit('remove-column', $event)"
         @reset="emit('reset-structure')"

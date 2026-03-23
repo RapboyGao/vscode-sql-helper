@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
+import * as XLSX from "xlsx";
 import {
   analyzeSqlText,
   buildAliasMap,
@@ -17,6 +18,14 @@ type DatabaseProfile = {
   type: "sqlite" | "generic";
   path: string;
   lastUsedAt: string;
+  connection?: {
+    protocol: string;
+    host: string;
+    port: string;
+    database: string;
+    username: string;
+    password?: string;
+  };
 };
 
 type WebviewState = {
@@ -70,6 +79,8 @@ type WebviewMessage =
   | { type: "previewTable"; tableName?: string }
   | { type: "previewQuery" }
   | { type: "explainQuery" }
+  | { type: "exportDatabase" }
+  | { type: "exportTable"; tableName?: string }
   | { type: "openAnalyzer" };
 
 type SaveProfileInput = {
@@ -77,6 +88,7 @@ type SaveProfileInput = {
   name?: string;
   type?: "sqlite" | "generic";
   path?: string;
+  connection?: DatabaseProfile["connection"];
 };
 
 type SqliteTableColumn = {
@@ -147,6 +159,9 @@ type PreviewPanelState = {
   warning?: string;
 };
 
+type ExportScope = "database" | "table";
+type ExportFormat = "xlsx" | "csv" | "json";
+
 const PROFILE_STORAGE_KEY = "sqlHelper.databaseProfiles";
 const ACTIVE_PROFILE_KEY = "sqlHelper.activeProfileId";
 const SELECTED_TABLE_KEY = "sqlHelper.selectedTableName";
@@ -186,6 +201,11 @@ export function activate(context: vscode.ExtensionContext): void {
       });
 
       await configureWebview(context, panel.webview, undefined, "panel");
+    }),
+    vscode.commands.registerCommand("sqlHelper.addConnection", async () => {
+      await promptAndSaveConnection(context);
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
       await previewTable(context, tableName);
@@ -238,6 +258,28 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("sqlHelper.explainQuery", async () => {
       await explainQuery(context, queryProvider);
+    }),
+    vscode.commands.registerCommand("sqlHelper.exportDatabaseNode", async (profileIdOrNode?: string | ExplorerNode) => {
+      const profile = resolveProfileArgument(context, profileIdOrNode)
+        ?? getProfiles(context).find((profile) => profile.id === context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null))
+        ?? null;
+
+      if (!profile || profile.type !== "sqlite") {
+        void vscode.window.showWarningMessage("Only SQLite databases can be exported.");
+        return;
+      }
+
+      await exportSqliteDatabase(profile.path, profile.name);
+    }),
+    vscode.commands.registerCommand("sqlHelper.exportTableNode", async (tableOrNode?: string | ExplorerNode) => {
+      const table = resolveTableArgument(tableOrNode);
+      const activeSchema = await getActiveSqliteSchema(context);
+
+      if (!table || !activeSchema) {
+        return;
+      }
+
+      await exportSqliteTable(activeSchema.path, table.name);
     }),
     vscode.commands.registerCommand("sqlHelper.selectProfileNode", async (profileId?: string) => {
       await context.globalState.update(ACTIVE_PROFILE_KEY, profileId ?? null);
@@ -715,6 +757,34 @@ async function configureWebview(
       return;
     }
 
+    if (message.type === "exportDatabase") {
+      const activeProfileId = context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null);
+      const activeProfile = activeProfileId
+        ? getProfiles(context).find((profile) => profile.id === activeProfileId) ?? null
+        : null;
+
+      if (!activeProfile || activeProfile.type !== "sqlite") {
+        void vscode.window.showWarningMessage("No active SQLite database selected.");
+        return;
+      }
+
+      await exportSqliteDatabase(activeProfile.path, activeProfile.name);
+      return;
+    }
+
+    if (message.type === "exportTable") {
+      const activeSchema = await getActiveSqliteSchema(context);
+      const selectedName = message.tableName ?? context.globalState.get<string | null>(SELECTED_TABLE_KEY, null) ?? undefined;
+
+      if (!activeSchema || !selectedName) {
+        void vscode.window.showWarningMessage("No SQLite table selected for export.");
+        return;
+      }
+
+      await exportSqliteTable(activeSchema.path, selectedName);
+      return;
+    }
+
     if (message.type === "openAnalyzer") {
       await vscode.commands.executeCommand("sqlHelper.openAnalyzer");
     }
@@ -780,6 +850,13 @@ class SqlHelperExplorerProvider implements vscode.TreeDataProvider<ExplorerNode>
           id: "saved",
           label: "Saved Databases",
           description: profiles.length ? `${profiles.length}` : "Empty"
+        },
+        {
+          kind: "action",
+          id: "add-connection",
+          label: "Add Connection",
+          command: "sqlHelper.addConnection",
+          icon: "add"
         },
         {
           kind: "action",
@@ -1027,7 +1104,8 @@ async function saveProfile(
     name,
     type,
     path: profilePath,
-    lastUsedAt: new Date().toISOString()
+    lastUsedAt: new Date().toISOString(),
+    connection: input?.connection
   };
 
   const nextProfiles = [nextProfile, ...current.filter((profile) => profile.id !== id)]
@@ -1065,6 +1143,157 @@ function buildProfileId(profilePath: string): string {
 
 function inferProfileType(profilePath: string): "sqlite" | "generic" {
   return SQLITE_EXTENSIONS.has(path.extname(profilePath).toLowerCase()) ? "sqlite" : "generic";
+}
+
+async function promptAndSaveConnection(context: vscode.ExtensionContext): Promise<void> {
+  const target = await vscode.window.showQuickPick(
+    [
+      {
+        label: "SQLite File",
+        description: "Choose a local .sqlite/.db file",
+        value: "sqlite"
+      },
+      {
+        label: "Server Connection",
+        description: "Protocol + host + username/password",
+        value: "server"
+      }
+    ],
+    {
+      title: "Add Connection",
+      placeHolder: "Choose the connection type"
+    }
+  );
+
+  if (!target) {
+    return;
+  }
+
+  if (target.value === "sqlite") {
+    const file = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      openLabel: "Select SQLite Database",
+      filters: {
+        SQLite: ["sqlite", "sqlite3", "db", "db3"],
+        All: ["*"]
+      }
+    });
+
+    if (!file?.[0]) {
+      return;
+    }
+
+    const profilePath = file[0].fsPath;
+    const profileName = await vscode.window.showInputBox({
+      title: "Connection name",
+      prompt: "Name for this SQLite connection",
+      value: path.basename(profilePath)
+    });
+
+    if (!profileName) {
+      return;
+    }
+
+    await saveProfile(context, {
+      name: profileName.trim(),
+      type: "sqlite",
+      path: profilePath
+    });
+    return;
+  }
+
+  const protocolPick = await vscode.window.showQuickPick(
+    [
+      { label: "PostgreSQL", value: "postgresql", port: "5432" },
+      { label: "MySQL", value: "mysql", port: "3306" },
+      { label: "MariaDB", value: "mariadb", port: "3306" },
+      { label: "SQL Server", value: "sqlserver", port: "1433" }
+    ],
+    {
+      title: "Server protocol",
+      placeHolder: "Choose the database protocol"
+    }
+  );
+
+  if (!protocolPick) {
+    return;
+  }
+
+  const host = await promptRequiredInput("Host", "Database server host", "127.0.0.1");
+  if (!host) {
+    return;
+  }
+
+  const port = await vscode.window.showInputBox({
+    title: "Port",
+    prompt: "Server port",
+    value: protocolPick.port
+  });
+  if (port === undefined) {
+    return;
+  }
+
+  const database = await promptRequiredInput("Database", "Database name", "");
+  if (!database) {
+    return;
+  }
+
+  const username = await promptRequiredInput("Username", "Username for this connection", "");
+  if (!username) {
+    return;
+  }
+
+  const password = await vscode.window.showInputBox({
+    title: "Password",
+    prompt: "Password for this connection",
+    password: true
+  });
+  if (password === undefined) {
+    return;
+  }
+
+  const defaultName = `${database}@${host}`;
+  const profileName = await promptRequiredInput("Connection name", "Name for this saved connection", defaultName);
+  if (!profileName) {
+    return;
+  }
+
+  const connection = {
+    protocol: protocolPick.value,
+    host: host.trim(),
+    port: port.trim(),
+    database: database.trim(),
+    username: username.trim(),
+    password
+  };
+
+  await saveProfile(context, {
+    name: profileName.trim(),
+    type: "generic",
+    path: buildConnectionTargetString(connection),
+    connection
+  });
+}
+
+async function promptRequiredInput(title: string, prompt: string, value: string): Promise<string | undefined> {
+  return vscode.window.showInputBox({
+    title,
+    prompt,
+    value,
+    validateInput: (inputValue) => inputValue.trim() ? null : `${title} is required.`
+  });
+}
+
+function buildConnectionTargetString(connection: NonNullable<DatabaseProfile["connection"]>): string {
+  const authority = connection.port.trim()
+    ? `${connection.host.trim()}:${connection.port.trim()}`
+    : connection.host.trim();
+  const userPrefix = connection.username.trim()
+    ? `${connection.username.trim()}@`
+    : "";
+  return `${connection.protocol}://${userPrefix}${authority}/${connection.database.trim()}`;
 }
 
 function isSqliteFile(uri: vscode.Uri): boolean {
@@ -1370,6 +1599,192 @@ async function deleteActiveTableRow(
   }
 
   return nextPayload;
+}
+
+async function exportSqliteDatabase(databasePath: string, databaseName: string): Promise<void> {
+  const schema = await loadSqliteSchema(databasePath);
+  const format = await pickExportFormat("database");
+
+  if (!format) {
+    return;
+  }
+
+  if (format === "csv") {
+    const folder = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Export CSV files here"
+    });
+
+    if (!folder?.[0]) {
+      return;
+    }
+
+    const prefix = await vscode.window.showInputBox({
+      title: "CSV file prefix",
+      prompt: `Prefix for CSV files exported from ${databaseName}`,
+      value: sanitizeFilename(path.parse(databaseName).name)
+    });
+
+    if (prefix === undefined) {
+      return;
+    }
+
+    for (const table of schema.tables) {
+      const rows = await loadAllTableRows(databasePath, table.name);
+      const csv = rowsToCsv(rows);
+      const filename = `${sanitizeFilename(prefix || path.parse(databaseName).name)}-${sanitizeFilename(table.name)}.csv`;
+      await fs.writeFile(path.join(folder[0].fsPath, filename), csv, "utf8");
+    }
+
+    void vscode.window.showInformationMessage(`Exported ${schema.tables.length} tables to CSV in ${folder[0].fsPath}`);
+    return;
+  }
+
+  const saveUri = await vscode.window.showSaveDialog({
+    saveLabel: format === "xlsx" ? "Export Excel workbook" : "Export JSON",
+    defaultUri: vscode.Uri.file(
+      path.join(path.dirname(databasePath), `${sanitizeFilename(path.parse(databaseName).name)}.${format}`)
+    ),
+    filters: format === "xlsx"
+      ? { Excel: ["xlsx"] }
+      : { JSON: ["json"] }
+  });
+
+  if (!saveUri) {
+    return;
+  }
+
+  if (format === "xlsx") {
+    const workbook = XLSX.utils.book_new();
+
+    for (const table of schema.tables) {
+      const rows = await loadAllTableRows(databasePath, table.name);
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(table.name));
+    }
+
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    await fs.writeFile(saveUri.fsPath, buffer);
+    void vscode.window.showInformationMessage(`Exported database to ${saveUri.fsPath}`);
+    return;
+  }
+
+  const payload = Object.fromEntries(
+    await Promise.all(
+      schema.tables.map(async (table) => [table.name, await loadAllTableRows(databasePath, table.name)] as const)
+    )
+  );
+  await fs.writeFile(saveUri.fsPath, JSON.stringify(payload, null, 2), "utf8");
+  void vscode.window.showInformationMessage(`Exported database to ${saveUri.fsPath}`);
+}
+
+async function exportSqliteTable(databasePath: string, tableName: string): Promise<void> {
+  const format = await pickExportFormat("table");
+
+  if (!format) {
+    return;
+  }
+
+  const defaultName = sanitizeFilename(tableName);
+  const saveUri = await vscode.window.showSaveDialog({
+    saveLabel: format === "xlsx" ? "Export Excel file" : format === "csv" ? "Export CSV" : "Export JSON",
+    defaultUri: vscode.Uri.file(
+      path.join(path.dirname(databasePath), `${defaultName}.${format}`)
+    ),
+    filters:
+      format === "xlsx"
+        ? { Excel: ["xlsx"] }
+        : format === "csv"
+          ? { CSV: ["csv"] }
+          : { JSON: ["json"] }
+  });
+
+  if (!saveUri) {
+    return;
+  }
+
+  const rows = await loadAllTableRows(databasePath, tableName);
+
+  if (format === "xlsx") {
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    XLSX.utils.book_append_sheet(workbook, worksheet, sanitizeSheetName(tableName));
+    const buffer = XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    await fs.writeFile(saveUri.fsPath, buffer);
+  } else if (format === "csv") {
+    await fs.writeFile(saveUri.fsPath, rowsToCsv(rows), "utf8");
+  } else {
+    await fs.writeFile(saveUri.fsPath, JSON.stringify(rows, null, 2), "utf8");
+  }
+
+  void vscode.window.showInformationMessage(`Exported ${tableName} to ${saveUri.fsPath}`);
+}
+
+async function pickExportFormat(scope: ExportScope): Promise<ExportFormat | null> {
+  const items = scope === "database"
+    ? [
+        { label: "Excel workbook (.xlsx)", description: "One sheet per table", format: "xlsx" as const },
+        { label: "JSON (.json)", description: "All tables in one JSON file", format: "json" as const },
+        { label: "CSV files", description: "One CSV file per table in a folder", format: "csv" as const }
+      ]
+    : [
+        { label: "Excel workbook (.xlsx)", description: "Single worksheet export", format: "xlsx" as const },
+        { label: "CSV (.csv)", description: "Comma-separated values", format: "csv" as const },
+        { label: "JSON (.json)", description: "Array of row objects", format: "json" as const }
+      ];
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: scope === "database" ? "Export database as..." : "Export table as...",
+    placeHolder: "Choose an export format"
+  });
+
+  return picked?.format ?? null;
+}
+
+async function loadAllTableRows(databasePath: string, tableName: string): Promise<Record<string, unknown>[]> {
+  return runSqliteJson<Record<string, unknown>>(
+    databasePath,
+    `SELECT * FROM ${quoteSqliteIdentifier(tableName)};`
+  );
+}
+
+function rowsToCsv(rows: Record<string, unknown>[]): string {
+  const columnNames = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+
+  if (columnNames.length === 0) {
+    return "";
+  }
+
+  const header = columnNames.map(escapeCsvCell).join(",");
+  const body = rows
+    .map((row) => columnNames.map((columnName) => escapeCsvCell(row[columnName])).join(","))
+    .join("\n");
+  return `${header}\n${body}`;
+}
+
+function escapeCsvCell(value: unknown): string {
+  const text = value === null || value === undefined
+    ? ""
+    : typeof value === "object"
+      ? JSON.stringify(value)
+      : String(value);
+
+  if (!/[",\n]/.test(text)) {
+    return text;
+  }
+
+  return `"${text.replace(/"/g, "\"\"")}"`;
+}
+
+function sanitizeFilename(value: string): string {
+  return value.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_");
+}
+
+function sanitizeSheetName(value: string): string {
+  const sanitized = value.replace(/[\\/?*\[\]:]/g, "_").slice(0, 31);
+  return sanitized || "Sheet1";
 }
 
 async function applyActiveTableSchema(
