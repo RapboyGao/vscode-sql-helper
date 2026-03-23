@@ -22,6 +22,10 @@
       {
         "command": "sqlHelper.openAnalyzer",
         "title": "SQL Helper: Open Analyzer"
+      },
+      {
+        "command": "sqlHelper.previewTable",
+        "title": "SQL Helper: Preview SQLite Table"
       }
     ],
     "customEditors": [
