@@ -48,6 +48,14 @@
       {
         "command": "sqlHelper.deleteProfileNode",
         "title": "SQL Helper: Delete Database"
+      },
+      {
+        "command": "sqlHelper.renameTableNode",
+        "title": "SQL Helper: Rename Table"
+      },
+      {
+        "command": "sqlHelper.deleteTableNode",
+        "title": "SQL Helper: Delete Table"
       }
     ],
     "menus": {
@@ -60,6 +68,16 @@
         {
           "command": "sqlHelper.deleteProfileNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
+          "group": "inline@2"
+        },
+        {
+          "command": "sqlHelper.renameTableNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
+          "group": "inline"
+        },
+        {
+          "command": "sqlHelper.deleteTableNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.table",
           "group": "inline@2"
         }
       ]

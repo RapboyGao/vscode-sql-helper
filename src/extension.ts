@@ -225,6 +225,75 @@ export function activate(context: vscode.ExtensionContext): void {
 
       await explorerProvider.refresh();
     }),
+    vscode.commands.registerCommand("sqlHelper.renameTableNode", async (tableOrNode?: string | ExplorerNode) => {
+      const table = resolveTableArgument(tableOrNode);
+      const activeSchema = await getActiveSqliteSchema(context);
+
+      if (!table || !activeSchema) {
+        return;
+      }
+
+      const nextName = await vscode.window.showInputBox({
+        title: "Rename table",
+        prompt: `Rename SQLite table "${table.name}"`,
+        value: table.name,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+
+          if (!trimmed) {
+            return "Table name is required.";
+          }
+
+          if (!/^[a-z_][a-z0-9_]*$/i.test(trimmed)) {
+            return "Use a valid SQL identifier.";
+          }
+
+          if (activeSchema.tables.some((entry) => entry.name.toLowerCase() === trimmed.toLowerCase() && entry.name !== table.name)) {
+            return "A table with this name already exists.";
+          }
+
+          return null;
+        }
+      });
+
+      if (!nextName || nextName.trim() === table.name) {
+        return;
+      }
+
+      await runSqliteStatement(
+        activeSchema.path,
+        `ALTER TABLE ${quoteSqliteIdentifier(table.name)} RENAME TO ${quoteSqliteIdentifier(nextName.trim())};`
+      );
+      invalidateSchemaCache(activeSchema.path);
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+    }),
+    vscode.commands.registerCommand("sqlHelper.deleteTableNode", async (tableOrNode?: string | ExplorerNode) => {
+      const table = resolveTableArgument(tableOrNode);
+      const activeSchema = await getActiveSqliteSchema(context);
+
+      if (!table || !activeSchema) {
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete table "${table.name}" from ${path.basename(activeSchema.path)}?`,
+        { modal: true },
+        "Delete"
+      );
+
+      if (confirmed !== "Delete") {
+        return;
+      }
+
+      await runSqliteStatement(
+        activeSchema.path,
+        `DROP TABLE ${quoteSqliteIdentifier(table.name)};`
+      );
+      invalidateSchemaCache(activeSchema.path);
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+    }),
     vscode.commands.registerCommand("sqlHelper.refreshExplorer", async () => {
       await explorerProvider.refresh();
     }),
@@ -705,6 +774,26 @@ function resolveProfileArgument(
 
   const profileId = typeof profileIdOrNode === "string" ? profileIdOrNode : null;
   return profileId ? getProfiles(context).find((profile) => profile.id === profileId) ?? null : null;
+}
+
+function resolveTableArgument(tableOrNode?: string | ExplorerNode): SqliteTable | null {
+  if (!tableOrNode) {
+    return null;
+  }
+
+  if (typeof tableOrNode === "object" && tableOrNode.kind === "table") {
+    return tableOrNode.table;
+  }
+
+  if (typeof tableOrNode === "string") {
+    return {
+      name: tableOrNode,
+      createSql: "",
+      columns: []
+    };
+  }
+
+  return null;
 }
 
 async function getWebviewState(
