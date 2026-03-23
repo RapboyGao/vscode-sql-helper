@@ -20,10 +20,12 @@ type DatabaseProfile = {
 };
 
 type SqliteTableColumn = {
+  cid: number;
   name: string;
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  defaultValue: string | null;
 };
 
 type SqliteTable = {
@@ -61,7 +63,17 @@ type TableDataPayload = {
   pageSize: number;
   totalRows: number;
   keyColumns: string[];
+  search: string;
   rows: TableDataRow[];
+};
+
+type ColumnSchemaDraft = {
+  sourceName: string;
+  name: string;
+  type: string;
+  notNull: boolean;
+  primaryKey: boolean;
+  defaultValue: string;
 };
 
 type VsCodeApi = {
@@ -96,6 +108,11 @@ const tableDataPending = ref(false);
 const tableDataError = ref("");
 const dirtyRows = ref<Record<string, Record<string, string>>>({});
 const rowSavePending = ref<Record<string, boolean>>({});
+const tableSearch = ref("");
+const tableDetailTab = ref<"data" | "structure">("data");
+const structureDraft = ref<ColumnSchemaDraft[]>([]);
+const structurePending = ref(false);
+const structureError = ref("");
 
 const activeProfile = computed(() => {
   if (!activeProfileId.value) {
@@ -202,6 +219,7 @@ watch(
       selectedTableName.value = "";
       tableData.value = null;
       dirtyRows.value = {};
+      structureDraft.value = [];
       return;
     }
 
@@ -210,7 +228,8 @@ watch(
     }
 
     if (isSqliteEditor.value && selectedTableName.value) {
-      void loadTableData(selectedTableName.value, 0);
+      resetStructureDraft();
+      void loadTableData(selectedTableName.value, 0, tableSearch.value);
     }
   }
 );
@@ -292,7 +311,7 @@ function saveProfile(): void {
   });
 }
 
-function loadTableData(tableName = selectedTableName.value, page = 0): void {
+function loadTableData(tableName = selectedTableName.value, page = 0, search = tableSearch.value): void {
   if (!tableName) {
     return;
   }
@@ -300,10 +319,12 @@ function loadTableData(tableName = selectedTableName.value, page = 0): void {
   tableDataPending.value = true;
   tableDataError.value = "";
   selectedTableName.value = tableName;
+  tableSearch.value = search;
   vscode?.postMessage({
     type: "loadTableData",
     tableName,
-    page
+    page,
+    search
   });
 }
 
@@ -365,8 +386,39 @@ function saveRow(row: TableDataRow): void {
     type: "updateTableRow",
     tableName: selectedTableName.value,
     page: currentPage.value,
+    search: tableSearch.value,
     rowKey: row.rowKey,
     values
+  });
+}
+
+function resetStructureDraft(): void {
+  structureDraft.value = (activeTable.value?.columns ?? []).map((column) => ({
+    sourceName: column.name,
+    name: column.name,
+    type: column.type || "",
+    notNull: column.notNull,
+    primaryKey: column.primaryKey,
+    defaultValue: column.defaultValue ?? ""
+  }));
+  structureError.value = "";
+}
+
+function applyStructure(): void {
+  if (!selectedTableName.value) {
+    return;
+  }
+
+  structurePending.value = true;
+  structureError.value = "";
+  vscode?.postMessage({
+    type: "applyTableSchema",
+    tableName: selectedTableName.value,
+    search: tableSearch.value,
+    columns: structureDraft.value.map((column) => ({
+      ...column,
+      defaultValue: column.defaultValue.trim() || null
+    }))
   });
 }
 
@@ -404,6 +456,7 @@ onMounted(() => {
 
         if (firstTable) {
           selectedTableName.value = firstTable;
+          resetStructureDraft();
           loadTableData(firstTable, 0);
         }
       } else {
@@ -450,6 +503,7 @@ onMounted(() => {
       tableDataPending.value = false;
       tableData.value = payload as TableDataPayload;
       selectedTableName.value = tableData.value.tableName;
+      tableSearch.value = tableData.value.search;
       dirtyRows.value = {};
       rowSavePending.value = {};
       return;
@@ -459,6 +513,21 @@ onMounted(() => {
       tableDataPending.value = false;
       rowSavePending.value = {};
       tableDataError.value = String(payload ?? "Failed to load table data");
+      return;
+    }
+
+    if (type === "tableSchemaApplied") {
+      structurePending.value = false;
+      sqliteSchema.value = (payload?.sqliteSchema ?? null) as SqliteSchema | null;
+      tableData.value = (payload?.tableData ?? null) as TableDataPayload | null;
+      tableSearch.value = tableData.value?.search ?? "";
+      resetStructureDraft();
+      return;
+    }
+
+    if (type === "tableSchemaError") {
+      structurePending.value = false;
+      structureError.value = String(payload ?? "Failed to update table structure");
       return;
     }
 

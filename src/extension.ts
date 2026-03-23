@@ -37,13 +37,20 @@ type WebviewMessage =
   | { type: "saveProfile"; payload?: SaveProfileInput }
   | { type: "selectProfile"; profileId?: string | null }
   | { type: "refreshSchema" }
-  | { type: "loadTableData"; tableName?: string; page?: number }
+  | { type: "loadTableData"; tableName?: string; page?: number; search?: string }
   | {
       type: "updateTableRow";
       tableName?: string;
       page?: number;
+      search?: string;
       rowKey?: Record<string, unknown>;
       values?: Record<string, unknown>;
+    }
+  | {
+      type: "applyTableSchema";
+      tableName?: string;
+      search?: string;
+      columns?: ColumnSchemaInput[];
     }
   | { type: "previewTable"; tableName?: string }
   | { type: "previewQuery" }
@@ -58,10 +65,12 @@ type SaveProfileInput = {
 };
 
 type SqliteTableColumn = {
+  cid: number;
   name: string;
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  defaultValue: string | null;
 };
 
 type SqliteTable = {
@@ -87,7 +96,17 @@ type TableDataPayload = {
   pageSize: number;
   totalRows: number;
   keyColumns: string[];
+  search: string;
   rows: TableDataRow[];
+};
+
+type ColumnSchemaInput = {
+  sourceName: string;
+  name: string;
+  type: string;
+  notNull: boolean;
+  primaryKey: boolean;
+  defaultValue: string | null;
 };
 
 type SchemaDocument = {
@@ -509,7 +528,12 @@ async function configureWebview(
 
     if (message.type === "loadTableData") {
       try {
-        const payload = await loadActiveTableData(context, message.tableName, message.page ?? 0);
+        const payload = await loadActiveTableData(
+          context,
+          message.tableName,
+          message.page ?? 0,
+          message.search ?? ""
+        );
         webview.postMessage({
           type: "tableDataLoaded",
           payload
@@ -527,6 +551,7 @@ async function configureWebview(
           context,
           message.tableName,
           message.page ?? 0,
+          message.search ?? "",
           message.rowKey ?? {},
           message.values ?? {}
         );
@@ -539,6 +564,27 @@ async function configureWebview(
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
         webview.postMessage({ type: "tableDataError", payload: text });
+      }
+      return;
+    }
+
+    if (message.type === "applyTableSchema") {
+      try {
+        const payload = await applyActiveTableSchema(
+          context,
+          message.tableName,
+          message.search ?? "",
+          message.columns ?? []
+        );
+        webview.postMessage({
+          type: "tableSchemaApplied",
+          payload
+        });
+        await sqlHelperExplorerProvider?.refresh();
+        await refreshDiagnosticsForOpenSqlDocuments(context);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        webview.postMessage({ type: "tableSchemaError", payload: text });
       }
       return;
     }
@@ -943,10 +989,12 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
   };
 
   type TableInfoRow = {
+    cid: number;
     name: string;
     type: string | null;
     notnull: number;
     pk: number;
+    dflt_value: string | null;
   };
 
   const tables = await runSqliteJson<SqliteMasterRow>(
@@ -965,10 +1013,12 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
         name: table.name,
         createSql: table.sql ?? "",
         columns: columns.map((column) => ({
+          cid: column.cid,
           name: column.name,
           type: column.type ?? "",
           notNull: column.notnull === 1,
-          primaryKey: column.pk > 0
+          primaryKey: column.pk > 0,
+          defaultValue: column.dflt_value
         }))
       };
     })
@@ -1026,7 +1076,8 @@ async function runSqliteCount(databasePath: string, sql: string): Promise<number
 async function loadActiveTableData(
   context: vscode.ExtensionContext,
   requestedTableName: string | undefined,
-  requestedPage: number
+  requestedPage: number,
+  search: string
 ): Promise<TableDataPayload> {
   const schema = await getActiveSqliteSchema(context);
 
@@ -1037,16 +1088,18 @@ async function loadActiveTableData(
   const table = resolveRequestedTable(schema, requestedTableName);
   const keyColumns = table.columns.filter((column) => column.primaryKey).map((column) => column.name);
   const page = Math.max(0, requestedPage);
+  const normalizedSearch = search.trim();
   const selectColumns = keyColumns.length > 0
     ? "*"
     : `"rowid" AS "__sqlhelper_rowid__", *`;
+  const whereClause = buildTableSearchWhereClause(table.columns, normalizedSearch);
   const rows = await runSqliteJson<Record<string, unknown>>(
     schema.path,
-    `SELECT ${selectColumns} FROM ${quoteSqliteIdentifier(table.name)} LIMIT ${PREVIEW_PAGE_SIZE} OFFSET ${page * PREVIEW_PAGE_SIZE};`
+    `SELECT ${selectColumns} FROM ${quoteSqliteIdentifier(table.name)}${whereClause} LIMIT ${PREVIEW_PAGE_SIZE} OFFSET ${page * PREVIEW_PAGE_SIZE};`
   );
   const totalRows = await runSqliteCount(
     schema.path,
-    `SELECT COUNT(*) AS total FROM ${quoteSqliteIdentifier(table.name)};`
+    `SELECT COUNT(*) AS total FROM ${quoteSqliteIdentifier(table.name)}${whereClause};`
   );
 
   return {
@@ -1055,6 +1108,7 @@ async function loadActiveTableData(
     pageSize: PREVIEW_PAGE_SIZE,
     totalRows: totalRows ?? rows.length,
     keyColumns: keyColumns.length > 0 ? keyColumns : ["__sqlhelper_rowid__"],
+    search: normalizedSearch,
     rows: rows.map((row) => {
       const rowKeySource = keyColumns.length > 0 ? keyColumns : ["__sqlhelper_rowid__"];
       const rowKey = Object.fromEntries(rowKeySource.map((columnName) => [columnName, row[columnName]]));
@@ -1072,6 +1126,7 @@ async function updateActiveTableRow(
   context: vscode.ExtensionContext,
   requestedTableName: string | undefined,
   requestedPage: number,
+  search: string,
   rowKey: Record<string, unknown>,
   values: Record<string, unknown>
 ): Promise<TableDataPayload> {
@@ -1117,7 +1172,131 @@ async function updateActiveTableRow(
     `UPDATE ${quoteSqliteIdentifier(table.name)} SET ${setClause} WHERE ${whereClause};`
   );
   invalidateSchemaCache(schema.path);
-  return loadActiveTableData(context, table.name, requestedPage);
+  return loadActiveTableData(context, table.name, requestedPage, search);
+}
+
+async function applyActiveTableSchema(
+  context: vscode.ExtensionContext,
+  requestedTableName: string | undefined,
+  search: string,
+  columns: ColumnSchemaInput[]
+): Promise<{ sqliteSchema: SqliteSchema; tableData: TableDataPayload }> {
+  const schema = await getActiveSqliteSchema(context);
+
+  if (!schema) {
+    throw new Error("No active SQLite database selected.");
+  }
+
+  const table = resolveRequestedTable(schema, requestedTableName);
+  const normalizedColumns = normalizeColumnSchemaInputs(table, columns);
+  const tempTableName = `__sqlhelper_rebuild_${Date.now()}`;
+  const createColumnsSql = normalizedColumns.map(toColumnDefinitionSql).join(", ");
+  const insertTargetColumns = normalizedColumns.map((column) => quoteSqliteIdentifier(column.name)).join(", ");
+  const selectSourceColumns = normalizedColumns
+    .map((column) => {
+      const sourceExists = table.columns.some((entry) => entry.name === column.sourceName);
+
+      if (!sourceExists) {
+        return column.defaultValue ? `${column.defaultValue} AS ${quoteSqliteIdentifier(column.name)}` : `NULL AS ${quoteSqliteIdentifier(column.name)}`;
+      }
+
+      return `${quoteSqliteIdentifier(column.sourceName)} AS ${quoteSqliteIdentifier(column.name)}`;
+    })
+    .join(", ");
+
+  await runSqliteStatement(
+    schema.path,
+    [
+      "BEGIN IMMEDIATE;",
+      `ALTER TABLE ${quoteSqliteIdentifier(table.name)} RENAME TO ${quoteSqliteIdentifier(tempTableName)};`,
+      `CREATE TABLE ${quoteSqliteIdentifier(table.name)} (${createColumnsSql});`,
+      `INSERT INTO ${quoteSqliteIdentifier(table.name)} (${insertTargetColumns}) SELECT ${selectSourceColumns} FROM ${quoteSqliteIdentifier(tempTableName)};`,
+      `DROP TABLE ${quoteSqliteIdentifier(tempTableName)};`,
+      "COMMIT;"
+    ].join(" ")
+  );
+
+  invalidateSchemaCache(schema.path);
+  const nextSchema = await loadSqliteSchema(schema.path);
+  const tableData = await loadActiveTableData(context, table.name, 0, search);
+  return {
+    sqliteSchema: nextSchema,
+    tableData
+  };
+}
+
+function normalizeColumnSchemaInputs(table: SqliteTable, columns: ColumnSchemaInput[]): ColumnSchemaInput[] {
+  if (columns.length === 0) {
+    throw new Error("At least one column definition is required.");
+  }
+
+  const usedNames = new Set<string>();
+
+  return columns.map((column, index) => {
+    const name = column.name.trim();
+    const type = column.type.trim().toUpperCase();
+    const sourceName = (column.sourceName || table.columns[index]?.name || name).trim();
+
+    if (!name) {
+      throw new Error("Column name is required.");
+    }
+
+    if (!/^[a-z_][a-z0-9_]*$/i.test(name)) {
+      throw new Error(`Invalid column name "${name}".`);
+    }
+
+    const normalizedName = name.toLowerCase();
+
+    if (usedNames.has(normalizedName)) {
+      throw new Error(`Duplicate column name "${name}".`);
+    }
+
+    usedNames.add(normalizedName);
+
+    return {
+      sourceName,
+      name,
+      type,
+      notNull: Boolean(column.notNull),
+      primaryKey: Boolean(column.primaryKey),
+      defaultValue: column.defaultValue?.trim() ? column.defaultValue.trim() : null
+    };
+  });
+}
+
+function toColumnDefinitionSql(column: ColumnSchemaInput): string {
+  const parts = [quoteSqliteIdentifier(column.name)];
+
+  if (column.type) {
+    parts.push(column.type);
+  }
+
+  if (column.primaryKey) {
+    parts.push("PRIMARY KEY");
+  }
+
+  if (column.notNull) {
+    parts.push("NOT NULL");
+  }
+
+  if (column.defaultValue) {
+    parts.push(`DEFAULT ${column.defaultValue}`);
+  }
+
+  return parts.join(" ");
+}
+
+function buildTableSearchWhereClause(columns: SqliteTableColumn[], search: string): string {
+  if (!search) {
+    return "";
+  }
+
+  const pattern = quoteSqliteLiteral(`%${search}%`);
+  const conditions = columns.map(
+    (column) => `CAST(${quoteSqliteIdentifier(column.name)} AS TEXT) LIKE ${pattern}`
+  );
+
+  return conditions.length ? ` WHERE ${conditions.join(" OR ")}` : "";
 }
 
 function resolveRequestedTable(schema: SqliteSchema, requestedTableName: string | undefined): SqliteTable {
