@@ -135,6 +135,20 @@ const totalPages = computed(() => {
 
   return Math.max(1, Math.ceil(tableData.value.totalRows / tableData.value.pageSize));
 });
+const pageStart = computed(() => {
+  if (!tableData.value || tableData.value.rows.length === 0) {
+    return 0;
+  }
+
+  return currentPage.value * tableData.value.pageSize + 1;
+});
+const pageEnd = computed(() => {
+  if (!tableData.value || tableData.value.rows.length === 0) {
+    return 0;
+  }
+
+  return currentPage.value * tableData.value.pageSize + tableData.value.rows.length;
+});
 
 const schemaInsights = computed(() => {
   if (!sqliteSchema.value) {
@@ -727,23 +741,35 @@ onMounted(() => {
                 <button type="button" class="button-ghost" @click="loadTableData(selectedTableName, 0, '')">
                   Clear
                 </button>
-                <button
-                  type="button"
-                  class="button-ghost"
-                  :disabled="tableDataPending || currentPage === 0"
-                  @click="loadTableData(selectedTableName, currentPage - 1, tableSearch)"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  class="button-ghost"
-                  :disabled="tableDataPending || currentPage + 1 >= totalPages"
-                  @click="loadTableData(selectedTableName, currentPage + 1, tableSearch)"
-                >
-                  Next
-                </button>
-                <span class="status-meta">Page {{ currentPage + 1 }} / {{ totalPages }}</span>
+              </div>
+
+              <div class="pagination-bar">
+                <div class="pagination-meta">
+                  <span class="pagination-range">{{ pageStart }}-{{ pageEnd }}</span>
+                  <span class="status-meta">of {{ tableData?.totalRows ?? 0 }} rows</span>
+                </div>
+                <div class="pagination-controls">
+                  <button
+                    type="button"
+                    class="pagination-button"
+                    :disabled="tableDataPending || currentPage === 0"
+                    @click="loadTableData(selectedTableName, currentPage - 1, tableSearch)"
+                  >
+                    Previous
+                  </button>
+                  <div class="pagination-page">
+                    <strong>{{ currentPage + 1 }}</strong>
+                    <span>/ {{ totalPages }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    class="pagination-button"
+                    :disabled="tableDataPending || currentPage + 1 >= totalPages"
+                    @click="loadTableData(selectedTableName, currentPage + 1, tableSearch)"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
 
               <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
