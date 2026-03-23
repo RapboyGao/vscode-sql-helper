@@ -74,6 +74,11 @@ type SchemaDocument = {
   columnLines: Map<string, number>;
 };
 
+type CachedSchemaEntry = {
+  mtimeMs: number;
+  schema: SqliteSchema;
+};
+
 const PROFILE_STORAGE_KEY = "sqlHelper.databaseProfiles";
 const ACTIVE_PROFILE_KEY = "sqlHelper.activeProfileId";
 const SQLITE_EXTENSIONS = new Set([".sqlite", ".sqlite3", ".db", ".db3"]);
@@ -82,11 +87,15 @@ const PREVIEW_SCHEME = "sql-helper-preview";
 const QUERY_SCHEME = "sql-helper-query";
 const DIAGNOSTIC_TABLE_CODE = "sqlHelper.missingTable";
 const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
+const DIAGNOSTIC_DEBOUNCE_MS = 180;
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
 let sqlHelperPreviewProvider: MemoryDocumentProvider | null = null;
 let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
 let sqlHelperExplorerProvider: SqlHelperExplorerProvider | null = null;
+const sqliteSchemaCache = new Map<string, CachedSchemaEntry>();
+const parsedDocumentCache = new Map<string, { version: number; parsed: ParsedSql }>();
+const diagnosticTimers = new Map<string, NodeJS.Timeout>();
 
 export function activate(context: vscode.ExtensionContext): void {
   const diagnostics = vscode.languages.createDiagnosticCollection("sqlHelper");
@@ -167,10 +176,12 @@ export function activate(context: vscode.ExtensionContext): void {
       void refreshDiagnosticsForDocument(context, diagnostics, document);
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
-      void refreshDiagnosticsForDocument(context, diagnostics, event.document);
+      scheduleDiagnosticsRefresh(context, diagnostics, event.document);
     }),
     vscode.workspace.onDidCloseTextDocument((document) => {
       diagnostics.delete(document.uri);
+      clearScheduledDiagnostics(document);
+      parsedDocumentCache.delete(document.uri.toString());
     }),
     vscode.window.onDidChangeActiveTextEditor(() => {
       void explorerProvider.refresh();
@@ -532,6 +543,22 @@ function getQueryProvider(): MemoryDocumentProvider {
   return sqlHelperQueryProvider;
 }
 
+function getParsedDocument(document: vscode.TextDocument): ParsedSql {
+  const key = document.uri.toString();
+  const cached = parsedDocumentCache.get(key);
+
+  if (cached && cached.version === document.version) {
+    return cached.parsed;
+  }
+
+  const parsed = parseSql(document.getText());
+  parsedDocumentCache.set(key, {
+    version: document.version,
+    parsed
+  });
+  return parsed;
+}
+
 async function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): Promise<string> {
   const distPath = vscode.Uri.joinPath(extensionUri, "dist", "webview");
   const htmlRaw = await fs.readFile(distPath.fsPath + "/index.html", "utf8");
@@ -578,6 +605,7 @@ async function saveProfile(
   }
 
   const type = input?.type ?? inferProfileType(profilePath);
+  invalidateSchemaCache(profilePath);
   const current = getProfiles(context);
   const id = input?.id ?? buildProfileId(profilePath);
   const nextProfile: DatabaseProfile = {
@@ -646,7 +674,12 @@ async function getActiveSqliteSchema(context: vscode.ExtensionContext): Promise<
 }
 
 async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
-  await fs.access(databasePath);
+  const stats = await fs.stat(databasePath);
+  const cached = sqliteSchemaCache.get(databasePath);
+
+  if (cached && cached.mtimeMs === stats.mtimeMs) {
+    return cached.schema;
+  }
 
   type SqliteMasterRow = {
     name: string;
@@ -685,11 +718,18 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
     })
   );
 
-  return {
+  const schema = {
     path: databasePath,
     tableCount: expandedTables.length,
     tables: expandedTables
   };
+
+  sqliteSchemaCache.set(databasePath, {
+    mtimeMs: stats.mtimeMs,
+    schema
+  });
+
+  return schema;
 }
 
 async function runSqliteJson<T>(databasePath: string, sql: string): Promise<T[]> {
@@ -747,8 +787,7 @@ function createHoverProvider(context: vscode.ExtensionContext): vscode.HoverProv
         return null;
       }
 
-      const text = document.getText();
-      const parsed = parseSql(text);
+      const parsed = getParsedDocument(document);
       const offset = document.offsetAt(position);
       const token = findTokenAtOffset(parsed, offset);
 
@@ -821,7 +860,7 @@ function createDefinitionProvider(
         return null;
       }
 
-      const parsed = parseSql(document.getText());
+      const parsed = getParsedDocument(document);
       const token = findTokenAtOffset(parsed, document.offsetAt(position));
 
       if (!token) {
@@ -902,7 +941,7 @@ function createCodeActionsProvider(context: vscode.ExtensionContext): vscode.Cod
 function createReferenceProvider(): vscode.ReferenceProvider {
   return {
     provideReferences(document, position) {
-      const parsed = parseSql(document.getText());
+      const parsed = getParsedDocument(document);
       const symbol = resolveSymbolAtPosition(document, parsed, position);
 
       if (!symbol) {
@@ -919,7 +958,7 @@ function createReferenceProvider(): vscode.ReferenceProvider {
 function createDocumentHighlightProvider(): vscode.DocumentHighlightProvider {
   return {
     provideDocumentHighlights(document, position) {
-      const parsed = parseSql(document.getText());
+      const parsed = getParsedDocument(document);
       const symbol = resolveSymbolAtPosition(document, parsed, position);
 
       if (!symbol) {
@@ -942,7 +981,7 @@ function createRenameProvider(context: vscode.ExtensionContext): vscode.RenamePr
         throw new Error("No active SQLite database selected.");
       }
 
-      const parsed = parseSql(document.getText());
+      const parsed = getParsedDocument(document);
       const token = findTokenAtOffset(parsed, document.offsetAt(position));
 
       if (!token) {
@@ -966,8 +1005,7 @@ function createRenameProvider(context: vscode.ExtensionContext): vscode.RenamePr
         throw new Error("Use a valid SQL identifier.");
       }
 
-      const text = document.getText();
-      const parsed = parseSql(text);
+      const parsed = getParsedDocument(document);
       const symbol = resolveSymbolAtPosition(document, parsed, position);
 
       if (!symbol) {
@@ -996,8 +1034,7 @@ async function provideSqlCompletions(
     return [];
   }
 
-  const text = document.getText();
-  const parsed = parseSql(text);
+  const parsed = getParsedDocument(document);
   const aliases = buildAliasMap(parsed);
   const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
   const dotMatch = linePrefix.match(/([a-z_][a-z0-9_]*)\.$/i);
@@ -1167,7 +1204,7 @@ async function refreshDiagnosticsForDocument(
     return;
   }
 
-  const parsed = parseSql(document.getText());
+  const parsed = getParsedDocument(document);
   const aliases = buildAliasMap(parsed);
   const tableMap = new Map(schema.tables.map((table) => [table.name.toLowerCase(), table]));
   const items: vscode.Diagnostic[] = [];
@@ -1275,6 +1312,40 @@ function buildSchemaDocument(schema: SqliteSchema): SchemaDocument {
 
 function createRangeFromOffsets(document: vscode.TextDocument, range: { start: number; end: number }): vscode.Range {
   return new vscode.Range(document.positionAt(range.start), document.positionAt(range.end));
+}
+
+function scheduleDiagnosticsRefresh(
+  context: vscode.ExtensionContext,
+  diagnostics: vscode.DiagnosticCollection,
+  document: vscode.TextDocument
+): void {
+  if (document.languageId !== "sql") {
+    return;
+  }
+
+  clearScheduledDiagnostics(document);
+  const key = document.uri.toString();
+  const timer = setTimeout(() => {
+    diagnosticTimers.delete(key);
+    void refreshDiagnosticsForDocument(context, diagnostics, document);
+  }, DIAGNOSTIC_DEBOUNCE_MS);
+  diagnosticTimers.set(key, timer);
+}
+
+function clearScheduledDiagnostics(document: vscode.TextDocument): void {
+  const key = document.uri.toString();
+  const timer = diagnosticTimers.get(key);
+
+  if (!timer) {
+    return;
+  }
+
+  clearTimeout(timer);
+  diagnosticTimers.delete(key);
+}
+
+function invalidateSchemaCache(databasePath: string): void {
+  sqliteSchemaCache.delete(databasePath);
 }
 
 function resolveSymbolAtPosition(
