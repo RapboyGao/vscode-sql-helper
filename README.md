@@ -12,8 +12,19 @@
 ## Development
 
 ```bash
-npm install
-npm run build
+pnpm install
+pnpm run build
 ```
 
-Then press `F5` in VS Code to run the extension host.
+Then open the workspace in VS Code and press `F5`.
+
+The default debug profile is `Run SQL Helper Extension`, which will:
+
+- run the `build-extension` task first
+- start a VS Code Extension Development Host
+- load this workspace as the extension under development
+
+Useful debug entries:
+
+- `Run SQL Helper Extension`: build first, then launch
+- `Run SQL Helper Extension (No Build)`: launch immediately if you already built

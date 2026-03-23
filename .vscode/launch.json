@@ -9,7 +9,30 @@
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}"
       ],
-      "preLaunchTask": "npm: build"
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
+      "preLaunchTask": "build-extension",
+      "presentation": {
+        "group": "extension",
+        "order": 1
+      }
+    },
+    {
+      "name": "Run SQL Helper Extension (No Build)",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
+      "presentation": {
+        "group": "extension",
+        "order": 2
+      }
     }
   ]
 }
