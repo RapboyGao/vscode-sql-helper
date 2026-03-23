@@ -40,8 +40,30 @@
       {
         "command": "sqlHelper.refreshExplorer",
         "title": "SQL Helper: Refresh Explorer"
+      },
+      {
+        "command": "sqlHelper.renameProfileNode",
+        "title": "SQL Helper: Rename Database"
+      },
+      {
+        "command": "sqlHelper.deleteProfileNode",
+        "title": "SQL Helper: Delete Database"
       }
     ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "sqlHelper.renameProfileNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
+          "group": "inline"
+        },
+        {
+          "command": "sqlHelper.deleteProfileNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
+          "group": "inline@2"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

@@ -165,6 +165,66 @@ export function activate(context: vscode.ExtensionContext): void {
       await explorerProvider.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
+    vscode.commands.registerCommand("sqlHelper.renameProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
+      const profile = resolveProfileArgument(context, profileIdOrNode);
+
+      if (!profile) {
+        return;
+      }
+
+      const nextName = await vscode.window.showInputBox({
+        title: "Rename database",
+        prompt: "Change the display name used in SQL Helper",
+        value: profile.name,
+        validateInput: (value) => value.trim() ? null : "Name is required."
+      });
+
+      if (!nextName || nextName.trim() === profile.name) {
+        return;
+      }
+
+      const profiles = getProfiles(context).map((entry) =>
+        entry.id === profile.id
+          ? {
+              ...entry,
+              name: nextName.trim(),
+              lastUsedAt: new Date().toISOString()
+            }
+          : entry
+      );
+
+      await context.globalState.update(PROFILE_STORAGE_KEY, profiles);
+      await explorerProvider.refresh();
+    }),
+    vscode.commands.registerCommand("sqlHelper.deleteProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
+      const profile = resolveProfileArgument(context, profileIdOrNode);
+
+      if (!profile) {
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete saved database "${profile.name}"?`,
+        { modal: true },
+        "Delete"
+      );
+
+      if (confirmed !== "Delete") {
+        return;
+      }
+
+      const nextProfiles = getProfiles(context).filter((entry) => entry.id !== profile.id);
+      await context.globalState.update(PROFILE_STORAGE_KEY, nextProfiles);
+
+      const activeProfileId = context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null);
+
+      if (activeProfileId === profile.id) {
+        await context.globalState.update(ACTIVE_PROFILE_KEY, nextProfiles[0]?.id ?? null);
+        await refreshDiagnosticsForOpenSqlDocuments(context);
+      }
+
+      await explorerProvider.refresh();
+    }),
     vscode.commands.registerCommand("sqlHelper.refreshExplorer", async () => {
       await explorerProvider.refresh();
     }),
@@ -629,6 +689,22 @@ async function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri)
 
 function getProfiles(context: vscode.ExtensionContext): DatabaseProfile[] {
   return context.globalState.get<DatabaseProfile[]>(PROFILE_STORAGE_KEY, []);
+}
+
+function resolveProfileArgument(
+  context: vscode.ExtensionContext,
+  profileIdOrNode?: string | ExplorerNode
+): DatabaseProfile | null {
+  if (!profileIdOrNode) {
+    return null;
+  }
+
+  if (typeof profileIdOrNode === "object" && profileIdOrNode.kind === "profile") {
+    return profileIdOrNode.profile;
+  }
+
+  const profileId = typeof profileIdOrNode === "string" ? profileIdOrNode : null;
+  return profileId ? getProfiles(context).find((profile) => profile.id === profileId) ?? null : null;
 }
 
 async function getWebviewState(
