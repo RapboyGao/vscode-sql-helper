@@ -1,10 +1,14 @@
-const { Parser } = require("node-sql-parser") as {
+type SqlParserModule = {
   Parser: new () => {
     astify(sql: string, options?: { database?: string }): unknown;
   };
 };
 
-const parser = new Parser();
+let parserInstance:
+  | {
+      astify(sql: string, options?: { database?: string }): unknown;
+    }
+  | null = null;
 
 export type OffsetRange = {
   start: number;
@@ -181,6 +185,7 @@ function parseSqlAst(sql: string): {
   cteNames: Set<string>;
 } {
   try {
+    const parser = getParser();
     const ast = parser.astify(sql, { database: "sqlite" });
     const statements = Array.isArray(ast) ? ast : [ast];
     const tableReferences: AstTableReference[] = [];
@@ -203,6 +208,19 @@ function parseSqlAst(sql: string): {
       cteNames: new Set<string>()
     };
   }
+}
+
+function getParser(): {
+  astify(sql: string, options?: { database?: string }): unknown;
+} {
+  if (parserInstance) {
+    return parserInstance;
+  }
+
+  const runtimeRequire = eval("require") as (id: string) => SqlParserModule;
+  const { Parser } = runtimeRequire("node-sql-parser");
+  parserInstance = new Parser();
+  return parserInstance;
 }
 
 function walkStatement(

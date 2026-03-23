@@ -84,7 +84,7 @@
   "scripts": {
     "clean": "rimraf dist bin",
     "build": "pnpm run build:rust && pnpm run build:webview && pnpm run build:extension",
-    "build:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js",
+    "build:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --external:node-sql-parser --outfile=dist/extension.js",
     "build:webview": "vite build --config webview/vite.config.ts",
     "build:rust": "cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release && node scripts/copy-rust-binary.mjs",
     "dev:webview": "vite build --watch --config webview/vite.config.ts",
