@@ -1,0 +1,158 @@
+:root {
+  color-scheme: light;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 102, 0.3), transparent 30%),
+    linear-gradient(135deg, #f7f1e3, #fffdf8 45%, #edf6f9);
+  color: #172121;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.hero {
+  max-width: 800px;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 12px;
+  color: #7f5539;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 0.95;
+  margin-bottom: 12px;
+}
+
+.subtitle {
+  max-width: 720px;
+  color: #3d405b;
+}
+
+.panel,
+.card {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(127, 85, 57, 0.12);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(23, 33, 33, 0.08);
+}
+
+.panel {
+  padding: 20px;
+}
+
+label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+textarea {
+  width: 100%;
+  min-height: 220px;
+  border: none;
+  resize: vertical;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(247, 241, 227, 0.75);
+  color: #172121;
+}
+
+.actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #7f5539, #b08968);
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.results {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.card {
+  padding: 20px;
+}
+
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(127, 85, 57, 0.12);
+}
+
+.note {
+  margin-top: 16px;
+  color: #5f0f40;
+}
+
+.error {
+  margin-top: 16px;
+  color: #9a031e;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    padding: 18px;
+  }
+
+  h1 {
+    line-height: 1;
+  }
+}
