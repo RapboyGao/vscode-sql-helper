@@ -748,15 +748,49 @@ onMounted(() => {
           <section class="panel studio-data-panel">
             <div class="panel-head compact">
               <div>
-                <p class="panel-kicker">Editable Data</p>
+                <p class="panel-kicker">Table Workspace</p>
                 <h2>{{ activeTable?.name ?? "Table rows" }}</h2>
               </div>
               <div class="table-toolbar">
                 <button
                   type="button"
+                  class="tab-button"
+                  :class="{ active: tableDetailTab === 'data' }"
+                  @click="tableDetailTab = 'data'"
+                >
+                  Data
+                </button>
+                <button
+                  type="button"
+                  class="tab-button"
+                  :class="{ active: tableDetailTab === 'structure' }"
+                  @click="tableDetailTab = 'structure'"
+                >
+                  Structure
+                </button>
+              </div>
+            </div>
+
+            <div v-if="tableDetailTab === 'data'" class="table-tab-panel">
+              <div class="table-search-bar">
+                <input
+                  v-model="tableSearch"
+                  class="input search-input"
+                  type="text"
+                  placeholder="Fuzzy search current table"
+                  @keydown.enter.prevent="loadTableData(selectedTableName, 0, tableSearch)"
+                />
+                <button type="button" class="button-secondary" @click="loadTableData(selectedTableName, 0, tableSearch)">
+                  Search
+                </button>
+                <button type="button" class="button-ghost" @click="loadTableData(selectedTableName, 0, '')">
+                  Clear
+                </button>
+                <button
+                  type="button"
                   class="button-ghost"
                   :disabled="tableDataPending || currentPage === 0"
-                  @click="loadTableData(selectedTableName, currentPage - 1)"
+                  @click="loadTableData(selectedTableName, currentPage - 1, tableSearch)"
                 >
                   Previous
                 </button>
@@ -764,53 +798,100 @@ onMounted(() => {
                   type="button"
                   class="button-ghost"
                   :disabled="tableDataPending || currentPage + 1 >= totalPages"
-                  @click="loadTableData(selectedTableName, currentPage + 1)"
+                  @click="loadTableData(selectedTableName, currentPage + 1, tableSearch)"
                 >
                   Next
                 </button>
                 <span class="status-meta">Page {{ currentPage + 1 }} / {{ totalPages }}</span>
               </div>
+
+              <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
+              <p v-else-if="tableDataPending" class="empty">Loading rows…</p>
+
+              <div v-else-if="tableData?.rows.length" class="data-grid-wrap">
+                <table class="data-grid">
+                  <thead>
+                    <tr>
+                      <th v-for="column in activeTable?.columns ?? []" :key="column.name">
+                        {{ column.name }}
+                      </th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
+                      <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
+                        <input
+                          :value="editableValue(row, column.name)"
+                          class="grid-input"
+                          type="text"
+                          @input="updateDraft(row, column.name, ($event.target as HTMLInputElement).value)"
+                        />
+                      </td>
+                      <td class="row-actions">
+                        <button
+                          type="button"
+                          class="button-secondary"
+                          :disabled="rowSavePending[rowKeyId(row)]"
+                          @click="saveRow(row)"
+                        >
+                          {{ rowSavePending[rowKeyId(row)] ? "Saving..." : "Save" }}
+                        </button>
+                        <button type="button" class="button-ghost" @click="resetRowDraft(row)">Reset</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-else class="empty">No rows loaded for this table.</p>
             </div>
 
-            <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
-            <p v-else-if="tableDataPending" class="empty">Loading rows…</p>
+            <div v-else class="table-tab-panel">
+              <p class="status-meta structure-note">
+                Applying structure changes rebuilds the SQLite table and migrates existing rows into the new definition.
+              </p>
+              <p v-if="structureError" class="error">{{ structureError }}</p>
 
-            <div v-else-if="tableData?.rows.length" class="data-grid-wrap">
-              <table class="data-grid">
-                <thead>
-                  <tr>
-                    <th v-for="column in activeTable?.columns ?? []" :key="column.name">
-                      {{ column.name }}
-                    </th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
-                    <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
-                      <input
-                        :value="editableValue(row, column.name)"
-                        class="grid-input"
-                        type="text"
-                        @input="updateDraft(row, column.name, ($event.target as HTMLInputElement).value)"
-                      />
-                    </td>
-                    <td class="row-actions">
-                      <button
-                        type="button"
-                        class="button-secondary"
-                        :disabled="rowSavePending[rowKeyId(row)]"
-                        @click="saveRow(row)"
-                      >
-                        {{ rowSavePending[rowKeyId(row)] ? "Saving..." : "Save" }}
-                      </button>
-                      <button type="button" class="button-ghost" @click="resetRowDraft(row)">Reset</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="data-grid-wrap">
+                <table class="data-grid structure-grid">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Default</th>
+                      <th>Not Null</th>
+                      <th>Primary Key</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(column, index) in structureDraft" :key="`${column.sourceName}:${index}`">
+                      <td><input v-model="column.name" class="grid-input" type="text" /></td>
+                      <td><input v-model="column.type" class="grid-input" type="text" placeholder="TEXT" /></td>
+                      <td><input v-model="column.defaultValue" class="grid-input" type="text" placeholder="NULL / 'x' / 0" /></td>
+                      <td>
+                        <label class="checkbox-cell">
+                          <input v-model="column.notNull" type="checkbox" />
+                          <span>NOT NULL</span>
+                        </label>
+                      </td>
+                      <td>
+                        <label class="checkbox-cell">
+                          <input v-model="column.primaryKey" type="checkbox" />
+                          <span>PK</span>
+                        </label>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="table-search-bar">
+                <button type="button" class="button-ghost" @click="resetStructureDraft">Reset Changes</button>
+                <button type="button" class="button-secondary" :disabled="structurePending" @click="applyStructure">
+                  {{ structurePending ? "Applying..." : "Apply Structure" }}
+                </button>
+              </div>
             </div>
-            <p v-else class="empty">No rows loaded for this table.</p>
           </section>
         </section>
 
