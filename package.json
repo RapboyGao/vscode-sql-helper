@@ -46,6 +46,10 @@
         "title": "SQL Helper: Remove Database Record"
       },
       {
+        "command": "sqlHelper.addTableNode",
+        "title": "SQL Helper: Add Table"
+      },
+      {
         "command": "sqlHelper.renameTableNode",
         "title": "SQL Helper: Rename Table"
       },
@@ -59,7 +63,12 @@
         {
           "command": "sqlHelper.deleteProfileNode",
           "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
-          "group": "inline"
+          "group": "modification@2"
+        },
+        {
+          "command": "sqlHelper.addTableNode",
+          "when": "view == sqlHelper.explorerView && viewItem == sqlHelper.profile",
+          "group": "modification"
         },
         {
           "command": "sqlHelper.renameTableNode",

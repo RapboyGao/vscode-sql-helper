@@ -122,6 +122,7 @@ const DIAGNOSTIC_TABLE_CODE = "sqlHelper.missingTable";
 const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 const DIAGNOSTIC_DEBOUNCE_MS = 180;
 const PREVIEW_PAGE_SIZE = 30;
+const SQLITE_BUSY_TIMEOUT_MS = 5000;
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
 let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
@@ -194,6 +195,59 @@ export function activate(context: vscode.ExtensionContext): void {
 
       await explorerProvider.refresh();
     }),
+    vscode.commands.registerCommand("sqlHelper.addTableNode", async (profileIdOrNode?: string | ExplorerNode) => {
+      const profile = resolveProfileArgument(context, profileIdOrNode);
+
+      if (!profile) {
+        return;
+      }
+
+      if (profile.type !== "sqlite") {
+        void vscode.window.showWarningMessage("Only SQLite databases support table creation.");
+        return;
+      }
+
+      const schema = await loadSqliteSchema(profile.path);
+      const tableName = await vscode.window.showInputBox({
+        title: "Add table",
+        prompt: `Create a new table in ${profile.name}`,
+        placeHolder: "new_table_name",
+        validateInput: (value) => {
+          const trimmed = value.trim();
+
+          if (!trimmed) {
+            return "Table name is required.";
+          }
+
+          if (!/^[a-z_][a-z0-9_]*$/i.test(trimmed)) {
+            return "Use a valid SQL identifier.";
+          }
+
+          if (schema.tables.some((entry) => entry.name.toLowerCase() === trimmed.toLowerCase())) {
+            return "A table with this name already exists.";
+          }
+
+          return null;
+        }
+      });
+
+      if (!tableName) {
+        return;
+      }
+
+      await runSqliteStatement(
+        profile.path,
+        `CREATE TABLE ${quoteSqliteIdentifier(tableName.trim())} ("id" INTEGER PRIMARY KEY AUTOINCREMENT);`
+      );
+      invalidateSchemaCache(profile.path);
+
+      if (context.globalState.get<string | null>(ACTIVE_PROFILE_KEY, null) !== profile.id) {
+        await context.globalState.update(ACTIVE_PROFILE_KEY, profile.id);
+      }
+
+      await explorerProvider.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+    }),
     vscode.commands.registerCommand("sqlHelper.renameTableNode", async (tableOrNode?: string | ExplorerNode) => {
       const table = resolveTableArgument(tableOrNode);
       const activeSchema = await getActiveSqliteSchema(context);
@@ -226,6 +280,16 @@ export function activate(context: vscode.ExtensionContext): void {
       });
 
       if (!nextName || nextName.trim() === table.name) {
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Rename table "${table.name}" to "${nextName.trim()}" in ${path.basename(activeSchema.path)}?`,
+        { modal: true },
+        "Rename"
+      );
+
+      if (confirmed !== "Rename") {
         return;
       }
 
@@ -926,7 +990,7 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
 
 async function runSqliteJson<T>(databasePath: string, sql: string): Promise<T[]> {
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = spawn("sqlite3", ["-json", databasePath, sql]);
+    const child = spawn("sqlite3", buildSqliteCommandArgs(databasePath, sql, true));
     let output = "";
     let errors = "";
 
@@ -945,7 +1009,7 @@ async function runSqliteJson<T>(databasePath: string, sql: string): Promise<T[]>
         return;
       }
 
-      reject(new Error(errors || `sqlite3 exited with code ${code ?? "unknown"}`));
+      reject(new Error(formatSqliteError(errors, code)));
     });
   });
 
@@ -1071,7 +1135,7 @@ function resolveRequestedTable(schema: SqliteSchema, requestedTableName: string 
 
 async function runSqliteStatement(databasePath: string, sql: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn("sqlite3", [databasePath, sql]);
+    const child = spawn("sqlite3", buildSqliteCommandArgs(databasePath, sql, false));
     let errors = "";
 
     child.stderr.on("data", (chunk) => {
@@ -1085,9 +1149,29 @@ async function runSqliteStatement(databasePath: string, sql: string): Promise<vo
         return;
       }
 
-      reject(new Error(errors || `sqlite3 exited with code ${code ?? "unknown"}`));
+      reject(new Error(formatSqliteError(errors, code)));
     });
   });
+}
+
+function buildSqliteCommandArgs(databasePath: string, sql: string, jsonMode: boolean): string[] {
+  return [
+    "-cmd",
+    `.timeout ${SQLITE_BUSY_TIMEOUT_MS}`,
+    ...(jsonMode ? ["-json"] : []),
+    databasePath,
+    sql
+  ];
+}
+
+function formatSqliteError(stderr: string, code: number | null): string {
+  const text = stderr.trim();
+
+  if (/database is locked/i.test(text)) {
+    return `Database is locked. SQL Helper waited ${SQLITE_BUSY_TIMEOUT_MS}ms but another process still holds the write lock. Close the other writer or retry.`;
+  }
+
+  return text || `sqlite3 exited with code ${code ?? "unknown"}`;
 }
 
 function quoteSqliteIdentifier(identifier: string): string {
