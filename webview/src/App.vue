@@ -320,6 +320,7 @@ function loadTableData(tableName = selectedTableName.value, page = 0, search = t
   tableDataError.value = "";
   selectedTableName.value = tableName;
   tableSearch.value = search;
+  resetStructureDraft();
   vscode?.postMessage({
     type: "loadTableData",
     tableName,
