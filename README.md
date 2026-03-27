@@ -154,7 +154,7 @@ GitHub Actions builds the Rust analyzer on multiple runners and uploads platform
 
 Workflow:
 
-- [build-binaries.yml](/Users/albert/Documents/vscode-sql-helper/.github/workflows/build-binaries.yml)
+- `.github/workflows/build-binaries.yml`
 
 Current targets:
 

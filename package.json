@@ -146,13 +146,14 @@
   "scripts": {
     "clean": "rimraf dist bin",
     "build": "pnpm run build:rust && pnpm run build:webview && pnpm run build:extension",
+    "build:vsix": "pnpm run build && pnpm dlx @vscode/vsce package --no-dependencies --out dist/sql-helper.vsix",
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --external:node-sql-parser --outfile=dist/extension.js",
     "build:webview": "vite build --config webview/vite.config.ts",
     "build:rust": "cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release && node scripts/copy-rust-binary.mjs",
     "dev:webview": "vite build --watch --config webview/vite.config.ts",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --watch",
     "check": "tsc --noEmit",
-    "package": "pnpm run build"
+    "package": "pnpm run build:vsix"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

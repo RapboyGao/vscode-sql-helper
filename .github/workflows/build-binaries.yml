@@ -17,17 +17,17 @@ jobs:
       matrix:
         include:
           - label: macOS x64
-            os: macos-13
+            os: macos-15-intel
             target: x86_64-apple-darwin
             bin_platform: darwin
             bin_arch: x64
           - label: macOS arm64
-            os: macos-14
+            os: macos-latest
             target: aarch64-apple-darwin
             bin_platform: darwin
             bin_arch: arm64
           - label: Linux x64
-            os: ubuntu-22.04
+            os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             bin_platform: linux
             bin_arch: x64
