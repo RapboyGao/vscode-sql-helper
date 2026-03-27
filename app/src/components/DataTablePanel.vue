@@ -47,27 +47,28 @@ onBeforeUnmount(() => {
 });
 
 function triggerSearch(nextValue: string, immediate = false): void {
-  emit("update:tableSearch", nextValue);
-
   if (searchTimer) {
     clearTimeout(searchTimer);
     searchTimer = null;
   }
 
   if (immediate) {
+    emit("update:tableSearch", nextValue);
     emit("search");
     return;
   }
 
   searchTimer = setTimeout(() => {
+    emit("update:tableSearch", nextValue);
     emit("search");
     searchTimer = null;
   }, SEARCH_DEBOUNCE_MS);
 }
 
-function handleSearchInput(value: string): void {
-  localSearch.value = value;
-  triggerSearch(value);
+function handleSearchInput(value: string | null): void {
+  const nextValue = value ?? "";
+  localSearch.value = nextValue;
+  triggerSearch(nextValue);
 }
 
 function clearSearch(): void {
@@ -83,11 +84,9 @@ function displayValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "";
   }
-
   if (typeof value === "object") {
     return JSON.stringify(value);
   }
-
   return String(value);
 }
 
@@ -120,22 +119,18 @@ function toTemporalInputValue(value: string, type: string | undefined): string {
   if (!value) {
     return "";
   }
-
   if (isDateColumn(type)) {
     const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
     return match?.[1] ?? value;
   }
-
   if (isTimeColumn(type)) {
     const timePart = value.includes("T") ? value.split("T")[1] : value.includes(" ") ? value.split(" ")[1] : value;
     return timePart.replace(/([+-]\d{2}:\d{2}|Z)$/i, "");
   }
-
   if (isDateTimeColumn(type)) {
     const normalized = value.replace(" ", "T").replace(/([+-]\d{2}:\d{2}|Z)$/i, "");
     return normalized.slice(0, 19);
   }
-
   return value;
 }
 
@@ -143,11 +138,9 @@ function fromTemporalInputValue(value: string, type: string | undefined): string
   if (!value) {
     return "";
   }
-
   if (isDateTimeColumn(type)) {
     return value.replace("T", " ");
   }
-
   return value;
 }
 
@@ -162,42 +155,49 @@ function isRowDirty(row: TableDataRow): boolean {
 function isReadonlyColumn(column: SqliteTable["columns"][number]): boolean {
   return column.autoIncrement;
 }
+
+function inputType(column: SqliteTable["columns"][number]): string {
+  if (isDateTimeColumn(column.type)) return "datetime-local";
+  if (isDateColumn(column.type)) return "date";
+  if (isTimeColumn(column.type)) return "time";
+  if (isIntegerColumn(column.type)) return "number";
+  return "text";
+}
 </script>
 
 <template>
   <div class="table-tab-panel">
-    <div class="table-search-bar table-search-shell">
-      <div class="search-input-wrap">
-        <input
-          :value="localSearch"
-          class="input search-input"
-          type="text"
-          placeholder="Fuzzy search current table"
-          @input="handleSearchInput(($event.target as HTMLInputElement).value)"
+    <v-card class="search-surface" variant="tonal">
+      <v-card-text class="d-flex flex-wrap align-center ga-4">
+        <v-text-field
+          :model-value="localSearch"
+          class="search-field"
+          prepend-inner-icon="mdi-magnify"
+          clearable
+          label="Fuzzy search current table"
+          @update:model-value="handleSearchInput(($event as string | null) ?? '')"
+          @click:clear="clearSearch"
           @keydown.enter.prevent="triggerSearch(localSearch, true)"
         />
-        <button
-          v-if="localSearch"
-          type="button"
-          class="search-clear-button"
-          title="Clear search"
-          @click="clearSearch"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
-              fill="currentColor"
-            />
-          </svg>
-        </button>
-      </div>
-      <button type="button" class="button-ghost" @click="emit('add-row')">Add Row</button>
-    </div>
+        <v-btn color="secondary" prepend-icon="mdi-table-row-plus-after" @click="emit('add-row')">
+          Add Row
+        </v-btn>
+      </v-card-text>
+    </v-card>
 
-    <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
-    <p v-else-if="tableDataPending" class="empty">Loading rows…</p>
+    <v-alert v-if="tableDataError" type="error" variant="tonal" icon="mdi-alert-circle-outline">
+      {{ tableDataError }}
+    </v-alert>
+    <v-alert
+      v-else-if="tableDataPending"
+      type="info"
+      variant="tonal"
+      icon="mdi-database-sync-outline"
+    >
+      Loading rows…
+    </v-alert>
 
-    <div v-else-if="newRowDraft || tableData?.rows.length" class="table-results-shell">
+    <v-card v-else-if="newRowDraft || tableData?.rows.length" class="results-surface" variant="tonal">
       <PaginationBar
         :page="tableData?.page ?? 0"
         :page-size="tableData?.pageSize ?? 30"
@@ -206,169 +206,110 @@ function isReadonlyColumn(column: SqliteTable["columns"][number]): boolean {
         @page="emit('page', $event)"
       />
 
-      <div class="data-grid-wrap">
-        <table class="data-grid data-grid-rows">
+      <div class="grid-scroll">
+        <table class="result-table">
           <thead>
             <tr>
               <th v-for="column in activeTable?.columns ?? []" :key="column.name">{{ column.name }}</th>
-              <th class="action-head">Actions</th>
+              <th class="sticky-action-col">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="newRowDraft">
               <td v-for="column in activeTable?.columns ?? []" :key="`new:${column.name}`">
-              <input
-                v-if="isIntegerColumn(column.type)"
-                :value="newRowDraft[column.name] ?? ''"
-                class="grid-input integer-input dirty"
-                type="number"
-                step="1"
-                :disabled="isReadonlyColumn(column)"
-                :placeholder="isReadonlyColumn(column) ? 'Auto increment' : ''"
-                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-              />
-                <input
-                  v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
-                  :value="toTemporalInputValue(newRowDraft[column.name] ?? '', column.type)"
-                class="grid-input temporal-input dirty"
-                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                :disabled="isReadonlyColumn(column)"
-                @input="emit(
-                  'update-new-cell',
-                  column.name,
-                    fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                  )"
+                <v-text-field
+                  :model-value="
+                    isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                      ? toTemporalInputValue(newRowDraft[column.name] ?? '', column.type)
+                      : (newRowDraft[column.name] ?? '')
+                  "
+                  :type="inputType(column)"
+                  :disabled="isReadonlyColumn(column)"
+                  :placeholder="isReadonlyColumn(column) ? 'Auto increment' : ''"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="grid-field"
+                  @update:model-value="
+                    emit(
+                      'update-new-cell',
+                      column.name,
+                      isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                        ? fromTemporalInputValue(String($event ?? ''), column.type)
+                        : String($event ?? '')
+                    )
+                  "
                 />
-                <input
-                  v-else
-                :value="newRowDraft[column.name] ?? ''"
-                class="grid-input dirty"
-                type="text"
-                :disabled="isReadonlyColumn(column)"
-                :placeholder="isReadonlyColumn(column) ? 'Auto increment' : ''"
-                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-              />
               </td>
-              <td class="row-actions action-cell">
-                <button
-                  type="button"
-                  class="icon-button icon-button-save"
-                  :disabled="newRowPending"
-                  title="Insert row"
-                  @click="emit('insert-row')"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"
-                      fill="currentColor"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="icon-button"
-                  title="Cancel new row"
-                  @click="emit('reset-new-row')"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
-                      fill="currentColor"
-                    />
-                  </svg>
-                </button>
+              <td class="sticky-action-col">
+                <div class="row-action-group">
+                  <v-btn
+                    icon="mdi-plus"
+                    color="secondary"
+                    variant="tonal"
+                    :loading="newRowPending"
+                    @click="emit('insert-row')"
+                  />
+                  <v-btn icon="mdi-close" variant="text" @click="emit('reset-new-row')" />
+                </div>
               </td>
             </tr>
-            <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
+
+            <tr v-for="row in tableData?.rows ?? []" :key="rowKeyId(row)">
               <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
-                <input
-                  v-if="isIntegerColumn(column.type)"
-                  :value="editableValue(row, column.name)"
-                  class="grid-input integer-input"
-                :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                type="number"
-                step="1"
-                :disabled="isReadonlyColumn(column)"
-                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-              />
-                <input
-                  v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
-                  :value="toTemporalInputValue(editableValue(row, column.name), column.type)"
-                  class="grid-input temporal-input"
-                  :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                :disabled="isReadonlyColumn(column)"
-                @input="emit(
-                  'update-cell',
-                  row,
-                    column.name,
-                    fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                  )"
+                <v-text-field
+                  :model-value="
+                    isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                      ? toTemporalInputValue(editableValue(row, column.name), column.type)
+                      : editableValue(row, column.name)
+                  "
+                  :type="inputType(column)"
+                  :disabled="isReadonlyColumn(column)"
+                  :class="{ 'dirty-field': isCellDirty(row, column.name) }"
+                  density="compact"
+                  variant="outlined"
+                  hide-details
+                  class="grid-field"
+                  @update:model-value="
+                    emit(
+                      'update-cell',
+                      row,
+                      column.name,
+                      isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                        ? fromTemporalInputValue(String($event ?? ''), column.type)
+                        : String($event ?? '')
+                    )
+                  "
                 />
-                <input
-                  v-else
-                  :value="editableValue(row, column.name)"
-                  class="grid-input"
-                :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                type="text"
-                :disabled="isReadonlyColumn(column)"
-                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-              />
               </td>
-              <td class="row-actions action-cell">
-                <template v-if="isRowDirty(row)">
-                  <button
-                    type="button"
-                    class="icon-button icon-button-save"
-                    :disabled="rowSavePending[rowKeyId(row)]"
-                    title="Save changes"
-                    @click="emit('save-row', row)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                        d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6M6 8V5h9v3z"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    class="icon-button"
-                    title="Reset changes"
-                    @click="emit('reset-row', row)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path
-                        d="M12 5a7 7 0 1 1-6.93 8h2.02A5 5 0 1 0 12 7c-1.38 0-2.63.56-3.54 1.46L11 11H4V4l2.03 2.03A8.96 8.96 0 0 1 12 5"
-                        fill="currentColor"
-                      />
-                    </svg>
-                  </button>
-                </template>
-                <button
-                  type="button"
-                  class="icon-button icon-button-danger"
-                  title="Delete row"
-                  @click="emit('delete-row', row)"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"
-                      fill="currentColor"
+              <td class="sticky-action-col">
+                <div class="row-action-group">
+                  <template v-if="isRowDirty(row)">
+                    <v-btn
+                      icon="mdi-content-save-outline"
+                      color="secondary"
+                      variant="tonal"
+                      :loading="rowSavePending[rowKeyId(row)]"
+                      @click="emit('save-row', row)"
                     />
-                  </svg>
-                </button>
+                    <v-btn icon="mdi-restore" variant="text" @click="emit('reset-row', row)" />
+                  </template>
+                  <v-btn icon="mdi-delete-outline" color="error" variant="text" @click="emit('delete-row', row)" />
+                </div>
               </td>
             </tr>
           </tbody>
         </table>
       </div>
-    </div>
-    <p v-else class="empty">No rows loaded for this table.</p>
+    </v-card>
+
+    <v-empty-state
+      v-else
+      class="empty-state-surface"
+      icon="mdi-table-off"
+      headline="No rows loaded"
+      text="Load a table or add a row to start editing."
+      title=""
+    />
   </div>
 </template>

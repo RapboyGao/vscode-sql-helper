@@ -36,77 +36,68 @@ function goToPage(page: number): void {
 
 function submitPageJump(): void {
   const parsedPage = Number.parseInt(jumpInput.value, 10);
-
   if (!Number.isFinite(parsedPage)) {
     jumpInput.value = String(props.page + 1);
     return;
   }
-
   goToPage(parsedPage - 1);
 }
 </script>
 
 <template>
-  <div class="pagination-bar">
-    <div class="pagination-meta">
-      <span class="pagination-range">{{ pageStart }}-{{ pageEnd }}</span>
-      <span class="status-meta">of {{ totalRows }} rows</span>
+  <div class="pagination-shell">
+    <div class="d-flex align-center ga-3 flex-wrap">
+      <v-chip color="primary" variant="tonal" size="small">
+        {{ pageStart }}-{{ pageEnd }}
+      </v-chip>
+      <span class="text-medium-emphasis">of {{ totalRows }} rows</span>
     </div>
-    <div class="pagination-controls">
-      <button
-        type="button"
-        class="pagination-button"
-        :disabled="pending || page === 0"
-        @click="goToPage(page - 1)"
-      >
-        &lt;
-      </button>
-      <button
+
+    <div class="d-flex align-center ga-2 flex-wrap justify-end">
+      <v-btn icon="mdi-chevron-left" variant="text" :disabled="pending || page === 0" @click="goToPage(page - 1)" />
+      <v-btn
         v-for="pageNumber in leadingPages"
         :key="`leading-${pageNumber}`"
-        type="button"
-        class="pagination-button pagination-number"
-        :class="{ active: pageNumber === page }"
-        :disabled="pending"
+        :active="pageNumber === page"
+        :color="pageNumber === page ? 'primary' : undefined"
+        variant="tonal"
+        min-width="40"
         @click="goToPage(pageNumber)"
       >
         {{ pageNumber + 1 }}
-      </button>
+      </v-btn>
+      <v-text-field
+        v-if="totalPages > 5"
+        v-model="jumpInput"
+        class="page-jump-field"
+        max-width="76"
+        inputmode="numeric"
+        @keydown.enter.prevent="submitPageJump"
+        @blur="submitPageJump"
+      />
       <template v-if="totalPages > 5">
-        <input
-          v-model="jumpInput"
-          class="page-jump-input"
-          type="text"
-          inputmode="numeric"
-          :disabled="pending"
-          :aria-label="`Jump to page, current page ${page + 1}`"
-          @keydown.enter.prevent="submitPageJump"
-          @blur="submitPageJump"
-        />
-        <template v-for="pageNumber in trailingPages" :key="`trailing-${pageNumber}`">
-          <button
-            type="button"
-            class="pagination-button pagination-number"
-            :class="{ active: pageNumber === page }"
-            :disabled="pending"
-            @click="goToPage(pageNumber)"
-          >
-            {{ pageNumber + 1 }}
-          </button>
-        </template>
+        <v-btn
+          v-for="pageNumber in trailingPages"
+          :key="`trailing-${pageNumber}`"
+          :active="pageNumber === page"
+          :color="pageNumber === page ? 'primary' : undefined"
+          variant="tonal"
+          min-width="40"
+          @click="goToPage(pageNumber)"
+        >
+          {{ pageNumber + 1 }}
+        </v-btn>
       </template>
-      <div v-else class="pagination-page">
+      <div v-else class="d-flex align-center ga-1 text-medium-emphasis">
         <strong>{{ page + 1 }}</strong>
         <span>/ {{ totalPages }}</span>
       </div>
-      <button
-        type="button"
-        class="pagination-button"
+      <v-btn
+        icon="mdi-chevron-right"
+        variant="text"
         :disabled="pending || page + 1 >= totalPages"
         @click="goToPage(page + 1)"
-      >
-        &gt;
-      </button>
+      />
     </div>
   </div>
 </template>

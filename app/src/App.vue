@@ -59,6 +59,14 @@ const activeProfile = computed(() => {
   return profiles.value.find((profile) => profile.id === activeProfileId.value) ?? null;
 });
 
+const profileSelectItems = computed(() => [
+  { title: "No active profile", value: "" },
+  ...profiles.value.map((profile) => ({
+    title: `${profile.name} · ${profile.type}`,
+    value: profile.id
+  }))
+]);
+
 const isSidebar = computed(() => host.value === "sidebar");
 const isSqliteEditor = computed(() => !isSidebar.value && Boolean(openedFile.value?.isSqliteFile));
 const activeTable = computed(
@@ -470,105 +478,177 @@ onMounted(() => {
 </script>
 
 <template>
-  <main class="shell" :class="{ 'shell-sidebar': isSidebar }">
-    <div class="ambient ambient-a" />
-    <div class="ambient ambient-b" />
+  <v-app class="app-shell">
+    <v-main>
+      <v-container fluid class="app-main pa-4 pa-md-5">
+        <div class="ambient ambient-a" />
+        <div class="ambient ambient-b" />
 
-    <SidebarExplorer
-      v-if="isSidebar"
-      :active-profile="activeProfile"
-      :active-profile-id="activeProfileId"
-      :profiles="profiles"
-      :sqlite-schema="sqliteSchema"
-      :selected-table-name="selectedTableName"
-      :schema-pending="schemaPending"
-      :error="error"
-      @select-profile="selectProfile"
-      @select-table="loadTableData($event, 0)"
-    />
+        <SidebarExplorer
+          v-if="isSidebar"
+          :active-profile="activeProfile"
+          :active-profile-id="activeProfileId"
+          :profiles="profiles"
+          :sqlite-schema="sqliteSchema"
+          :selected-table-name="selectedTableName"
+          :schema-pending="schemaPending"
+          :error="error"
+          @select-profile="selectProfile"
+          @select-table="loadTableData($event, 0)"
+        />
 
-    <SqliteStudio
-      v-else-if="isSqliteEditor"
-      :opened-file="openedFile"
-      :active-profile="activeProfile"
-      :sqlite-schema="sqliteSchema"
-      :selected-table-name="selectedTableName"
-      :active-table="activeTable"
-      :table-detail-tab="tableDetailTab"
-      :table-search="tableSearch"
-      :table-data="tableData"
-      :table-data-pending="tableDataPending"
-      :table-data-error="tableDataError"
-      :new-row-draft="newRowDraft"
-      :new-row-pending="newRowPending"
-      :dirty-rows="dirtyRows"
-      :row-save-pending="rowSavePending"
-      :structure-draft="structureDraft"
-      :structure-pending="structurePending"
-      :structure-error="structureError"
-      @select-table="loadTableData($event, 0)"
-      @update:table-detail-tab="tableDetailTab = $event"
-      @update:table-search="tableSearch = $event"
-      @search="loadTableData(selectedTableName, 0, tableSearch)"
-      @add-row="beginNewRow"
-      @page="loadTableData(selectedTableName, $event, tableSearch)"
-      @update-new-cell="updateNewRowDraft"
-      @insert-row="insertRow"
-      @reset-new-row="resetNewRowDraft"
-      @update-cell="(row, columnName, value) => updateDraft(row, columnName, value)"
-      @save-row="saveRow"
-      @reset-row="resetRowDraft"
-      @delete-row="deleteRow"
-      @add-column="addStructureColumn"
-      @remove-column="removeStructureColumn"
-      @export-database="exportDatabase"
-      @export-table="exportTable"
-      @reset-structure="resetStructureDraft"
-      @apply-structure="applyStructure"
-    />
+        <SqliteStudio
+          v-else-if="isSqliteEditor"
+          :opened-file="openedFile"
+          :active-profile="activeProfile"
+          :sqlite-schema="sqliteSchema"
+          :selected-table-name="selectedTableName"
+          :active-table="activeTable"
+          :table-detail-tab="tableDetailTab"
+          :table-search="tableSearch"
+          :table-data="tableData"
+          :table-data-pending="tableDataPending"
+          :table-data-error="tableDataError"
+          :new-row-draft="newRowDraft"
+          :new-row-pending="newRowPending"
+          :dirty-rows="dirtyRows"
+          :row-save-pending="rowSavePending"
+          :structure-draft="structureDraft"
+          :structure-pending="structurePending"
+          :structure-error="structureError"
+          @select-table="loadTableData($event, 0)"
+          @update:table-detail-tab="tableDetailTab = $event"
+          @update:table-search="tableSearch = $event"
+          @search="loadTableData(selectedTableName, 0, tableSearch)"
+          @add-row="beginNewRow"
+          @page="loadTableData(selectedTableName, $event, tableSearch)"
+          @update-new-cell="updateNewRowDraft"
+          @insert-row="insertRow"
+          @reset-new-row="resetNewRowDraft"
+          @update-cell="(row, columnName, value) => updateDraft(row, columnName, value)"
+          @save-row="saveRow"
+          @reset-row="resetRowDraft"
+          @delete-row="deleteRow"
+          @add-column="addStructureColumn"
+          @remove-column="removeStructureColumn"
+          @export-database="exportDatabase"
+          @export-table="exportTable"
+          @reset-structure="resetStructureDraft"
+          @apply-structure="applyStructure"
+        />
 
-    <section v-else class="generic-shell">
-      <section class="panel panel-input">
-        <div class="panel-head">
-          <div>
-            <p class="panel-kicker">SQL Analyzer</p>
-            <h2>Analyze SQL text against the current workspace context</h2>
-          </div>
-          <button type="button" :disabled="pending" @click="analyze">
-            {{ pending ? "Analyzing..." : "Analyze" }}
-          </button>
+        <div v-else class="generic-shell">
+          <v-row dense>
+            <v-col cols="12" lg="8">
+              <v-card class="analyzer-card" variant="flat">
+                <v-card-item>
+                  <template #prepend>
+                    <v-avatar color="primary" variant="tonal">
+                      <v-icon icon="mdi-code-braces" />
+                    </v-avatar>
+                  </template>
+                  <v-card-title>SQL Analyzer</v-card-title>
+                  <v-card-subtitle>Analyze SQL text against the current workspace context</v-card-subtitle>
+                  <template #append>
+                    <v-btn color="primary" :loading="pending" prepend-icon="mdi-play-circle-outline" @click="analyze">
+                      Analyze
+                    </v-btn>
+                  </template>
+                </v-card-item>
+                <v-card-text class="d-flex flex-column ga-4">
+                  <v-textarea v-model="sql" rows="16" auto-grow spellcheck="false" />
+                  <v-alert v-if="error" type="error" variant="tonal" icon="mdi-alert-circle-outline">
+                    {{ error }}
+                  </v-alert>
+                  <v-card v-if="result" variant="tonal" class="analysis-result-card">
+                    <v-card-item>
+                      <v-card-title>Analysis Result</v-card-title>
+                    </v-card-item>
+                    <v-card-text class="d-flex flex-column ga-4">
+                      <div class="d-flex flex-column ga-2">
+                        <div class="section-kicker">Databases</div>
+                        <div class="d-flex flex-wrap ga-2">
+                          <v-chip v-for="database in result.databases" :key="database" color="primary" variant="tonal">
+                            {{ database }}
+                          </v-chip>
+                          <span v-if="!result.databases.length" class="text-medium-emphasis">None</span>
+                        </div>
+                      </div>
+                      <div class="d-flex flex-column ga-2">
+                        <div class="section-kicker">Schemas</div>
+                        <div class="d-flex flex-wrap ga-2">
+                          <v-chip v-for="schema in result.schemas" :key="schema" color="secondary" variant="tonal">
+                            {{ schema }}
+                          </v-chip>
+                          <span v-if="!result.schemas.length" class="text-medium-emphasis">None</span>
+                        </div>
+                      </div>
+                      <div class="d-flex flex-column ga-2">
+                        <div class="section-kicker">References</div>
+                        <v-list density="compact" bg-color="transparent">
+                          <v-list-item
+                            v-for="reference in result.references"
+                            :key="`${reference.kind}:${reference.value}`"
+                          >
+                            <template #prepend>
+                              <v-icon icon="mdi-link-variant" />
+                            </template>
+                            <v-list-item-title>{{ reference.value }}</v-list-item-title>
+                            <v-list-item-subtitle>{{ reference.kind }}</v-list-item-subtitle>
+                          </v-list-item>
+                        </v-list>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </v-card-text>
+              </v-card>
+            </v-col>
+
+            <v-col cols="12" lg="4">
+              <v-card class="targets-card" variant="tonal">
+                <v-card-item>
+                  <template #prepend>
+                    <v-avatar color="secondary" variant="tonal">
+                      <v-icon icon="mdi-database-cog-outline" />
+                    </v-avatar>
+                  </template>
+                  <v-card-title>Saved Databases</v-card-title>
+                  <v-card-subtitle>Targets</v-card-subtitle>
+                </v-card-item>
+                <v-card-text class="d-flex flex-column ga-4">
+                  <v-select
+                    :model-value="activeProfileId ?? ''"
+                    :items="profileSelectItems"
+                    label="Active profile"
+                    prepend-inner-icon="mdi-database-outline"
+                    @update:model-value="selectProfile(String($event ?? ''))"
+                  />
+                  <v-text-field v-model="profileName" label="Display name" prepend-inner-icon="mdi-form-textbox" />
+                  <v-text-field v-model="profilePath" label="Database path" prepend-inner-icon="mdi-folder-outline" />
+                  <v-select
+                    v-model="profileType"
+                    :items="[
+                      { title: 'SQLite', value: 'sqlite' },
+                      { title: 'Generic', value: 'generic' }
+                    ]"
+                    label="Connection type"
+                    prepend-inner-icon="mdi-shape-outline"
+                  />
+                  <v-btn color="secondary" prepend-icon="mdi-content-save-outline" @click="saveProfile">
+                    Save Profile
+                  </v-btn>
+                  <v-alert v-if="profileMessage" type="success" variant="tonal" icon="mdi-check-circle-outline">
+                    {{ profileMessage }}
+                  </v-alert>
+                  <v-alert v-if="error" type="error" variant="tonal" icon="mdi-alert-circle-outline">
+                    {{ error }}
+                  </v-alert>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
         </div>
-
-        <textarea v-model="sql" class="input-area" spellcheck="false" />
-      </section>
-
-      <section class="panel panel-summary">
-        <div class="panel-head compact">
-          <div>
-            <p class="panel-kicker">Saved Databases</p>
-            <h2>Targets</h2>
-          </div>
-        </div>
-
-        <select
-          class="input"
-          :value="activeProfileId ?? ''"
-          @change="selectProfile(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">No active profile</option>
-          <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
-            {{ profile.name }} · {{ profile.type }}
-          </option>
-        </select>
-        <input v-model="profileName" class="input" type="text" placeholder="Display name" />
-        <input v-model="profilePath" class="input" type="text" placeholder="Database path" />
-        <select v-model="profileType" class="input">
-          <option value="sqlite">SQLite</option>
-          <option value="generic">Generic</option>
-        </select>
-        <button type="button" class="button-secondary" @click="saveProfile">Save Profile</button>
-        <p v-if="error" class="error">{{ error }}</p>
-      </section>
-    </section>
-  </main>
+      </v-container>
+    </v-main>
+  </v-app>
 </template>
