@@ -41,6 +41,7 @@ const selectedTableName = ref("");
 const tableData = ref<TableDataPayload | null>(null);
 const tableDataPending = ref(false);
 const tableDataError = ref("");
+const tableDataNotice = ref("");
 const newRowPending = ref(false);
 const rowSavePending = ref<Record<string, boolean>>({});
 const tableSearch = ref("");
@@ -139,6 +140,7 @@ function loadTableData(tableName = selectedTableName.value, page = 0, search = t
 
   tableDataPending.value = true;
   tableDataError.value = "";
+  tableDataNotice.value = "";
   selectedTableName.value = tableName;
   tableSearch.value = search;
   resetStructureDraft();
@@ -165,6 +167,7 @@ function saveRow(row: TableDataRow, values: Record<string, string>): void {
     [key]: true
   };
   tableDataError.value = "";
+  tableDataNotice.value = "";
   vscode?.postMessage({
     type: "updateTableRow",
     tableName: selectedTableName.value,
@@ -182,6 +185,7 @@ function insertRow(values: Record<string, string>): void {
 
   newRowPending.value = true;
   tableDataError.value = "";
+  tableDataNotice.value = "";
   vscode?.postMessage({
     type: "insertTableRow",
     tableName: selectedTableName.value,
@@ -196,6 +200,8 @@ function deleteRow(row: TableDataRow): void {
     return;
   }
 
+  tableDataError.value = "";
+  tableDataNotice.value = "";
   vscode?.postMessage({
     type: "deleteTableRow",
     tableName: selectedTableName.value,
@@ -361,6 +367,13 @@ onMounted(() => {
       selectedTableName.value = tableData.value.tableName;
       tableSearch.value = tableData.value.search;
       rowSavePending.value = {};
+      tableDataNotice.value = type === "rowUpdated"
+        ? "Row saved."
+        : type === "rowInserted"
+          ? "Row inserted."
+          : type === "rowDeleted"
+            ? "Row deleted."
+            : "";
       return;
     }
 
@@ -369,6 +382,7 @@ onMounted(() => {
       newRowPending.value = false;
       rowSavePending.value = {};
       tableDataError.value = String(payload ?? "Failed to load table data");
+      tableDataNotice.value = "";
       return;
     }
 
@@ -435,6 +449,7 @@ onMounted(() => {
           :table-data="tableData"
           :table-data-pending="tableDataPending"
           :table-data-error="tableDataError"
+          :table-data-notice="tableDataNotice"
           :new-row-pending="newRowPending"
           :row-save-pending="rowSavePending"
           :structure-draft="structureDraft"

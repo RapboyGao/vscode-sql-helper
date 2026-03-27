@@ -8,6 +8,7 @@ const props = defineProps<{
   tableData: TableDataPayload | null;
   tableDataPending: boolean;
   tableDataError: string;
+  tableDataNotice: string;
   tableSearch: string;
   newRowPending: boolean;
   rowSavePending: Record<string, boolean>;
@@ -61,7 +62,7 @@ watch(
 );
 
 watch(
-  () => [props.activeTable?.name, props.tableData?.page, props.tableData?.search, props.tableData?.rows.length].join(":"),
+  () => props.tableData,
   async () => {
     editingRowId.value = null;
     editingDraft.value = {};
@@ -162,6 +163,11 @@ function isIntegerColumn(type: string | undefined): boolean {
   return normalizeColumnType(type).includes("int");
 }
 
+function isNumericColumn(type: string | undefined): boolean {
+  const normalized = normalizeColumnType(type);
+  return normalized.includes("real") || normalized.includes("numeric") || normalized.includes("decimal") || normalized.includes("double") || normalized.includes("float");
+}
+
 function isDateColumn(type: string | undefined): boolean {
   return normalizeColumnType(type) === "date";
 }
@@ -175,12 +181,29 @@ function isDateTimeColumn(type: string | undefined): boolean {
   return normalized.includes("datetime") || normalized.includes("timestamp");
 }
 
-function inputType(column: SqliteTableColumn): string {
-  if (isDateTimeColumn(column.type)) return "datetime-local";
+function isBooleanColumn(type: string | undefined): boolean {
+  const normalized = normalizeColumnType(type);
+  return normalized.includes("bool");
+}
+
+function editorKind(column: SqliteTableColumn): "boolean" | "datetime" | "date" | "time" | "integer" | "numeric" | "text" {
+  if (isBooleanColumn(column.type)) return "boolean";
+  if (isDateTimeColumn(column.type)) return "datetime";
   if (isDateColumn(column.type)) return "date";
   if (isTimeColumn(column.type)) return "time";
-  if (isIntegerColumn(column.type)) return "number";
+  if (isIntegerColumn(column.type)) return "integer";
+  if (isNumericColumn(column.type)) return "numeric";
   return "text";
+}
+
+function numberStep(column: SqliteTableColumn): string | undefined {
+  if (isIntegerColumn(column.type)) {
+    return "1";
+  }
+  if (isNumericColumn(column.type)) {
+    return "any";
+  }
+  return undefined;
 }
 
 function toTemporalInputValue(value: string, type: string | undefined): string {
@@ -314,6 +337,14 @@ function rowOffset(index: number): number {
 function rowAriaLabel(row: TableDataRow): string {
   return `Row ${Object.values(row.rowKey).join(" ") || "entry"}`;
 }
+
+function booleanItems(): Array<{ title: string; value: string }> {
+  return [
+    { title: "True", value: "1" },
+    { title: "False", value: "0" },
+    { title: "NULL", value: "" }
+  ];
+}
 </script>
 
 <template>
@@ -351,7 +382,16 @@ function rowAriaLabel(row: TableDataRow): string {
       {{ tableDataError }}
     </v-alert>
     <v-alert
-      v-else-if="tableDataPending"
+      v-else-if="tableDataNotice"
+      type="success"
+      variant="tonal"
+      icon="mdi-check-circle-outline"
+      density="compact"
+    >
+      {{ tableDataNotice }}
+    </v-alert>
+    <v-alert
+      v-if="tableDataPending"
       type="info"
       variant="tonal"
       icon="mdi-database-sync-outline"
@@ -375,26 +415,53 @@ function rowAriaLabel(row: TableDataRow): string {
             :key="`draft:${column.name}`"
             class="virtual-grid-cell"
           >
-            <input
-              :value="
-                isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
-                  ? toTemporalInputValue(draftRow[column.name] ?? '', column.type)
-                  : (draftRow[column.name] ?? '')
-              "
-              :type="inputType(column)"
-              :disabled="column.autoIncrement"
-              :inputmode="isIntegerColumn(column.type) ? 'numeric' : undefined"
-              class="cell-editor"
-              :placeholder="column.autoIncrement ? 'Auto increment' : ''"
-              @input="
-                updateNewRowCell(
-                  column,
+            <template v-if="editorKind(column) === 'boolean'">
+              <v-select
+                :model-value="draftRow[column.name] ?? ''"
+                :items="booleanItems()"
+                :disabled="column.autoIncrement"
+                density="compact"
+                hide-details
+                variant="outlined"
+                class="cell-field"
+                @update:model-value="updateNewRowCell(column, String($event ?? ''))"
+              />
+            </template>
+            <template v-else>
+              <v-text-field
+                :model-value="
                   isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
-                    ? fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                    : ($event.target as HTMLInputElement).value
-                )
-              "
-            />
+                    ? toTemporalInputValue(draftRow[column.name] ?? '', column.type)
+                    : (draftRow[column.name] ?? '')
+                "
+                :type="
+                  editorKind(column) === 'datetime'
+                    ? 'datetime-local'
+                    : editorKind(column) === 'date'
+                      ? 'date'
+                      : editorKind(column) === 'time'
+                        ? 'time'
+                        : editorKind(column) === 'integer' || editorKind(column) === 'numeric'
+                          ? 'number'
+                          : 'text'
+                "
+                :step="numberStep(column)"
+                :disabled="column.autoIncrement"
+                :placeholder="column.autoIncrement ? 'Auto increment' : ''"
+                density="compact"
+                hide-details
+                variant="outlined"
+                class="cell-field"
+                @update:model-value="
+                  updateNewRowCell(
+                    column,
+                    isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                      ? fromTemporalInputValue(String($event ?? ''), column.type)
+                      : String($event ?? '')
+                  )
+                "
+              />
+            </template>
           </div>
           <div class="virtual-grid-cell cell-actions">
             <div class="native-row-actions">
@@ -448,26 +515,53 @@ function rowAriaLabel(row: TableDataRow): string {
                 :class="{ 'is-dirty': isEditingCellDirty(row, column) }"
               >
                 <template v-if="isEditingRow(row)">
-                  <input
-                    :value="
-                      isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
-                        ? toTemporalInputValue(currentCellValue(row, column), column.type)
-                        : currentCellValue(row, column)
-                    "
-                    :type="inputType(column)"
-                    :disabled="column.autoIncrement"
-                    :inputmode="isIntegerColumn(column.type) ? 'numeric' : undefined"
-                    class="cell-editor"
-                    :placeholder="column.autoIncrement ? 'Auto increment' : ''"
-                    @input="
-                      updateEditingCell(
-                        column,
+                  <template v-if="editorKind(column) === 'boolean'">
+                    <v-select
+                      :model-value="currentCellValue(row, column)"
+                      :items="booleanItems()"
+                      :disabled="column.autoIncrement"
+                      density="compact"
+                      hide-details
+                      variant="outlined"
+                      class="cell-field"
+                      @update:model-value="updateEditingCell(column, String($event ?? ''))"
+                    />
+                  </template>
+                  <template v-else>
+                    <v-text-field
+                      :model-value="
                         isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
-                          ? fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                          : ($event.target as HTMLInputElement).value
-                      )
-                    "
-                  />
+                          ? toTemporalInputValue(currentCellValue(row, column), column.type)
+                          : currentCellValue(row, column)
+                      "
+                      :type="
+                        editorKind(column) === 'datetime'
+                          ? 'datetime-local'
+                          : editorKind(column) === 'date'
+                            ? 'date'
+                            : editorKind(column) === 'time'
+                              ? 'time'
+                              : editorKind(column) === 'integer' || editorKind(column) === 'numeric'
+                                ? 'number'
+                                : 'text'
+                      "
+                      :step="numberStep(column)"
+                      :disabled="column.autoIncrement"
+                      :placeholder="column.autoIncrement ? 'Auto increment' : ''"
+                      density="compact"
+                      hide-details
+                      variant="outlined"
+                      class="cell-field"
+                      @update:model-value="
+                        updateEditingCell(
+                          column,
+                          isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)
+                            ? fromTemporalInputValue(String($event ?? ''), column.type)
+                            : String($event ?? '')
+                        )
+                      "
+                    />
+                  </template>
                 </template>
                 <template v-else>
                   <div class="cell-display" :title="currentCellValue(row, column)">

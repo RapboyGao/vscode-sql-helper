@@ -22,6 +22,7 @@ defineProps<{
   tableData: TableDataPayload | null;
   tableDataPending: boolean;
   tableDataError: string;
+  tableDataNotice: string;
   newRowPending: boolean;
   rowSavePending: Record<string, boolean>;
   structureDraft: ColumnSchemaDraft[];
@@ -94,7 +95,7 @@ const emit = defineEmits<{
         <v-card-title>{{ activeTable?.name ?? "Choose a table" }}</v-card-title>
         <v-card-subtitle>Table workspace</v-card-subtitle>
         <template #append>
-          <div class="d-flex flex-wrap ga-2 justify-end">
+          <div class="studio-header-actions">
             <v-btn variant="tonal" prepend-icon="mdi-file-excel-outline" @click="emit('export-database')">
               Export DB
             </v-btn>
@@ -130,6 +131,7 @@ const emit = defineEmits<{
           :table-data="tableData"
           :table-data-pending="tableDataPending"
           :table-data-error="tableDataError"
+          :table-data-notice="tableDataNotice"
           :table-search="tableSearch"
           :new-row-pending="newRowPending"
           :row-save-pending="rowSavePending"
