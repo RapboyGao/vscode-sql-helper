@@ -90,7 +90,7 @@ const emit = defineEmits<{
       </v-card-text>
     </v-card>
 
-    <v-card class="studio-content-card" variant="flat">
+    <v-card class="studio-content-card d-flex flex-column" variant="flat">
       <v-card-item>
         <template #prepend>
           <v-avatar color="secondary" variant="tonal">
@@ -128,7 +128,7 @@ const emit = defineEmits<{
 
       <v-divider />
 
-      <v-card-text class="studio-content-body">
+      <v-card-text class="studio-content-body d-flex flex-column">
         <DataTablePanel
           v-if="tableDetailTab === 'data'"
           :active-table="activeTable"
