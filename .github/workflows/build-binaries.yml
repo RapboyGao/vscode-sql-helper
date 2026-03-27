@@ -16,16 +16,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - label: macOS x64
+            os: macos-13
+            target: x86_64-apple-darwin
+            bin_platform: darwin
+            bin_arch: x64
           - label: macOS arm64
             os: macos-14
+            target: aarch64-apple-darwin
             bin_platform: darwin
             bin_arch: arm64
           - label: Linux x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
             bin_platform: linux
             bin_arch: x64
+          - label: Linux arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bin_platform: linux
+            bin_arch: arm64
           - label: Windows x64
             os: windows-latest
+            target: x86_64-pc-windows-msvc
             bin_platform: win32
             bin_arch: x64
 
@@ -49,12 +62,15 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Build Rust binary
-        run: cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release
+        run: cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release --target ${{ matrix.target }}
 
       - name: Copy platform binary
         env:
+          TARGET_TRIPLE: ${{ matrix.target }}
           BIN_PLATFORM: ${{ matrix.bin_platform }}
           BIN_ARCH: ${{ matrix.bin_arch }}
         run: node scripts/copy-rust-binary.mjs

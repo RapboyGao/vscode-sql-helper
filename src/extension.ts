@@ -173,6 +173,7 @@ const DIAGNOSTIC_COLUMN_CODE = "sqlHelper.missingColumn";
 const DIAGNOSTIC_DEBOUNCE_MS = 180;
 const PREVIEW_PAGE_SIZE = 30;
 const SQLITE_BUSY_TIMEOUT_MS = 5000;
+const ANALYZER_EXECUTABLE = process.platform === "win32" ? "sql-analyzer.exe" : "sql-analyzer";
 
 let sqlHelperDiagnostics: vscode.DiagnosticCollection | null = null;
 let sqlHelperQueryProvider: MemoryDocumentProvider | null = null;
@@ -579,7 +580,7 @@ async function configureWebview(
 
     if (message.type === "analyze") {
       try {
-        const result = analyzeSqlText(message.sql ?? "");
+        const result = await analyzeSqlWithRuntimeBinary(message.sql ?? "");
         webview.postMessage({ type: "analysisResult", payload: result });
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
@@ -1025,6 +1026,73 @@ async function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri)
 
 function getProfiles(context: vscode.ExtensionContext): DatabaseProfile[] {
   return context.globalState.get<DatabaseProfile[]>(PROFILE_STORAGE_KEY, []);
+}
+
+async function analyzeSqlWithRuntimeBinary(sql: string): Promise<AnalysisResult> {
+  const binaryPath = await resolveBundledSqlAnalyzerPath();
+
+  if (!binaryPath) {
+    return analyzeSqlText(sql);
+  }
+
+  try {
+    return await runRustSqlAnalyzer(binaryPath, sql);
+  } catch {
+    return analyzeSqlText(sql);
+  }
+}
+
+async function resolveBundledSqlAnalyzerPath(): Promise<string | null> {
+  const platformDir = `${process.platform}-${process.arch}`;
+  const candidates = [
+    path.resolve(__dirname, "..", "bin", platformDir, ANALYZER_EXECUTABLE),
+    path.resolve(__dirname, "..", "bin", ANALYZER_EXECUTABLE)
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function runRustSqlAnalyzer(binaryPath: string, sql: string): Promise<AnalysisResult> {
+  return new Promise<AnalysisResult>((resolve, reject) => {
+    const child = spawn(binaryPath, [], {
+      stdio: ["pipe", "pipe", "pipe"]
+    });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `sql-analyzer exited with code ${code ?? "unknown"}`));
+        return;
+      }
+
+      try {
+        resolve(JSON.parse(stdout) as AnalysisResult);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    child.stdin.end(sql);
+  });
 }
 
 function resolveProfileArgument(
@@ -1530,9 +1598,31 @@ async function insertActiveTableRow(
   }
 
   const table = resolveRequestedTable(schema, requestedTableName);
+  const columnMap = new Map(table.columns.map((column) => [column.name, column]));
   const providedEntries = Object.entries(values).filter(([, value]) => value !== undefined);
-  const allowedColumns = new Set(table.columns.map((column) => column.name));
-  const insertEntries = providedEntries.filter(([columnName]) => allowedColumns.has(columnName));
+  const insertEntries = providedEntries
+    .filter(([columnName]) => columnMap.has(columnName))
+    .flatMap(([columnName, value]) => {
+      const column = columnMap.get(columnName);
+
+      if (!column) {
+        return [];
+      }
+
+      const normalizedValue = typeof value === "string" ? value.trim() : value;
+      const isBlankString = normalizedValue === "";
+      const isIntegerPrimaryKey = column.primaryKey && /int/i.test(column.type);
+
+      if (isBlankString && isIntegerPrimaryKey) {
+        return [];
+      }
+
+      if (isBlankString && column.defaultValue !== null) {
+        return [];
+      }
+
+      return [[columnName, value] as const];
+    });
 
   if (insertEntries.length === 0) {
     await runSqliteStatement(
