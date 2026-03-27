@@ -4,6 +4,15 @@
   "description": "VS Code extension with Vue webview and Rust SQL analyzer.",
   "version": "0.0.1",
   "publisher": "local",
+  "license": "GPL-2.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RapboyGao/vscode-sql-helper.git"
+  },
+  "homepage": "https://github.com/RapboyGao/vscode-sql-helper",
+  "bugs": {
+    "url": "https://github.com/RapboyGao/vscode-sql-helper/issues"
+  },
   "private": true,
   "packageManager": "pnpm@10.11.0",
   "engines": {
@@ -144,16 +153,16 @@
     ]
   },
   "scripts": {
-    "clean": "rimraf dist bin",
-    "build": "pnpm run build:rust && pnpm run build:webview && pnpm run build:extension",
-    "build:vsix": "pnpm run build && pnpm dlx @vscode/vsce package --no-dependencies --out dist/sql-helper.vsix",
-    "build:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --external:node-sql-parser --outfile=dist/extension.js",
-    "build:webview": "vite build --config webview/vite.config.ts",
-    "build:rust": "cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release && node scripts/copy-rust-binary.mjs",
-    "dev:webview": "vite build --watch --config webview/vite.config.ts",
-    "watch:extension": "esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --watch",
-    "check": "tsc --noEmit",
-    "package": "pnpm run build:vsix"
+    "clean": "bash scripts/clean.sh",
+    "build": "bash scripts/build.sh",
+    "build:vsix": "bash scripts/build-vsix.sh",
+    "build:extension": "bash scripts/build-extension.sh",
+    "build:webview": "bash scripts/build-webview.sh",
+    "build:rust": "bash scripts/build-rust.sh",
+    "dev:webview": "bash scripts/dev-webview.sh",
+    "watch:extension": "bash scripts/watch-extension.sh",
+    "check": "bash scripts/check.sh",
+    "package": "bash scripts/package.sh"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
