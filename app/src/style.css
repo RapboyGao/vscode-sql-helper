@@ -82,6 +82,8 @@ body {
   display: grid;
   grid-template-columns: 320px minmax(0, 1fr);
   gap: 20px;
+  min-height: calc(100vh - 40px);
+  align-items: stretch;
 }
 
 .studio-sidebar-card,
@@ -96,12 +98,12 @@ body {
 }
 
 .studio-sidebar-card {
-  min-height: calc(100vh - 48px);
+  min-height: 100%;
 }
 
 .studio-content-card {
   min-width: 0;
-  min-height: calc(100vh - 48px);
+  min-height: 100%;
 }
 
 .studio-content-body {
@@ -110,9 +112,10 @@ body {
 }
 
 .table-tab-panel {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   gap: 16px;
+  flex: 1 1 auto;
   min-height: 100%;
 }
 
@@ -126,6 +129,7 @@ body {
 .results-surface {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
