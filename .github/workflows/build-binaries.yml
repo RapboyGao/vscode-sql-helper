@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -52,7 +52,7 @@ jobs:
           version: 10.11.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
@@ -76,7 +76,7 @@ jobs:
         run: node scripts/copy-rust-binary.mjs
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sql-helper-bin-${{ matrix.bin_platform }}-${{ matrix.bin_arch }}
           path: bin/${{ matrix.bin_platform }}-${{ matrix.bin_arch }}/
@@ -89,14 +89,14 @@ jobs:
 
     steps:
       - name: Download all binary artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist/platform-bins
           pattern: sql-helper-bin-*
           merge-multiple: false
 
       - name: Upload combined artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sql-helper-platform-bins
           path: dist/platform-bins
