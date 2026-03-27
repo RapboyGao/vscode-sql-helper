@@ -81,6 +81,7 @@ type WebviewMessage =
   | { type: "explainQuery" }
   | { type: "exportDatabase" }
   | { type: "exportTable"; tableName?: string }
+  | { type: "deleteTable"; tableName?: string }
   | { type: "openAnalyzer" };
 
 type SaveProfileInput = {
@@ -97,6 +98,7 @@ type SqliteTableColumn = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  unique: boolean;
   autoIncrement: boolean;
   defaultValue: string | null;
 };
@@ -134,6 +136,7 @@ type ColumnSchemaInput = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  unique: boolean;
   defaultValue: string | null;
 };
 
@@ -206,7 +209,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("sqlHelper.addConnection", async () => {
       await promptAndSaveConnection(context);
-      await explorerProvider.refresh();
+      await sqlHelperExplorerProvider?.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
     vscode.commands.registerCommand("sqlHelper.previewTable", async (tableName?: string) => {
@@ -230,7 +233,7 @@ export function activate(context: vscode.ExtensionContext): void {
           preview: false
         }
       );
-      await explorerProvider.refresh();
+      await sqlHelperExplorerProvider?.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
     vscode.commands.registerCommand("sqlHelper.openTableNode", async (tableOrNode?: string | ExplorerNode) => {
@@ -285,7 +288,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("sqlHelper.selectProfileNode", async (profileId?: string) => {
       await context.globalState.update(ACTIVE_PROFILE_KEY, profileId ?? null);
-      await explorerProvider.refresh();
+      await sqlHelperExplorerProvider?.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
     vscode.commands.registerCommand("sqlHelper.deleteProfileNode", async (profileIdOrNode?: string | ExplorerNode) => {
@@ -425,7 +428,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await context.globalState.update(SELECTED_TABLE_KEY, nextName.trim());
       }
       invalidateSchemaCache(activeSchema.path);
-      await explorerProvider.refresh();
+      await sqlHelperExplorerProvider?.refresh();
       await refreshDiagnosticsForOpenSqlDocuments(context);
     }),
     vscode.commands.registerCommand("sqlHelper.deleteTableNode", async (tableOrNode?: string | ExplorerNode) => {
@@ -784,6 +787,43 @@ async function configureWebview(
       }
 
       await exportSqliteTable(activeSchema.path, selectedName);
+      return;
+    }
+
+    if (message.type === "deleteTable") {
+      const activeSchema = await getActiveSqliteSchema(context);
+      const selectedName = message.tableName ?? context.globalState.get<string | null>(SELECTED_TABLE_KEY, null) ?? undefined;
+      const table = activeSchema?.tables.find((entry) => entry.name === selectedName);
+
+      if (!activeSchema || !table) {
+        void vscode.window.showWarningMessage("No SQLite table selected to delete.");
+        return;
+      }
+
+      const confirmed = await vscode.window.showWarningMessage(
+        `Delete table "${table.name}" from ${path.basename(activeSchema.path)}?`,
+        { modal: true },
+        "Delete"
+      );
+
+      if (confirmed !== "Delete") {
+        return;
+      }
+
+      await runSqliteStatement(
+        activeSchema.path,
+        `DROP TABLE ${quoteSqliteIdentifier(table.name)};`
+      );
+      if (context.globalState.get<string | null>(SELECTED_TABLE_KEY, null) === table.name) {
+        await context.globalState.update(SELECTED_TABLE_KEY, null);
+      }
+      invalidateSchemaCache(activeSchema.path);
+      await sqlHelperExplorerProvider?.refresh();
+      await refreshDiagnosticsForOpenSqlDocuments(context);
+      webview.postMessage({
+        type: "init",
+        payload: await getWebviewState(context, openedFile, host)
+      });
       return;
     }
 
@@ -1428,6 +1468,7 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
           type: column.type ?? "",
           notNull: column.notnull === 1,
           primaryKey: column.pk > 0,
+          unique: isUniqueColumn(table.sql ?? "", column.name),
           autoIncrement: isAutoIncrementColumn(table.sql ?? "", column.name),
           defaultValue: column.dflt_value
         }))
@@ -1701,10 +1742,14 @@ async function deleteActiveTableRow(
     })
     .join(" AND ");
 
-  await runSqliteStatement(
+  const deletedRows = await runSqliteCount(
     schema.path,
-    `DELETE FROM ${quoteSqliteIdentifier(table.name)} WHERE ${whereClause};`
+    `DELETE FROM ${quoteSqliteIdentifier(table.name)} WHERE ${whereClause}; SELECT changes() AS total;`
   );
+
+  if (!deletedRows) {
+    throw new Error("No rows were deleted. The row identity may be stale or the target record no longer exists.");
+  }
 
   invalidateSchemaCache(schema.path);
   const nextPayload = await loadActiveTableData(context, table.name, requestedPage, search);
@@ -1986,6 +2031,7 @@ function normalizeColumnSchemaInputs(table: SqliteTable, columns: ColumnSchemaIn
       type,
       notNull: Boolean(column.notNull),
       primaryKey: Boolean(column.primaryKey),
+      unique: Boolean(column.unique),
       defaultValue: column.defaultValue?.trim() ? column.defaultValue.trim() : null
     };
   });
@@ -2000,6 +2046,10 @@ function toColumnDefinitionSql(column: ColumnSchemaInput): string {
 
   if (column.primaryKey) {
     parts.push("PRIMARY KEY");
+  }
+
+  if (column.unique && !column.primaryKey) {
+    parts.push("UNIQUE");
   }
 
   if (column.notNull) {
@@ -2024,6 +2074,22 @@ function buildTableSearchWhereClause(columns: SqliteTableColumn[], search: strin
   );
 
   return conditions.length ? ` WHERE ${conditions.join(" OR ")}` : "";
+}
+
+function isUniqueColumn(createSql: string, columnName: string): boolean {
+  if (!createSql) {
+    return false;
+  }
+
+  const escapedName = escapeRegExp(columnName);
+  const inlineUniquePattern = new RegExp(`["\\[]?${escapedName}["\\]]?[^,)]*\\bUNIQUE\\b`, "i");
+
+  if (inlineUniquePattern.test(createSql)) {
+    return true;
+  }
+
+  const tableLevelUniquePattern = new RegExp(`\\bUNIQUE\\s*\\(\\s*["\\[]?${escapedName}["\\]]?\\s*\\)`, "i");
+  return tableLevelUniquePattern.test(createSql);
 }
 
 function resolveRequestedTable(schema: SqliteSchema, requestedTableName: string | undefined): SqliteTable {

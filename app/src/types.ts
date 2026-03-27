@@ -22,6 +22,7 @@ export type SqliteTableColumn = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  unique: boolean;
   autoIncrement: boolean;
   defaultValue: string | null;
 };
@@ -72,5 +73,6 @@ export type ColumnSchemaDraft = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  unique: boolean;
   defaultValue: string;
 };

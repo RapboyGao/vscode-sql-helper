@@ -22,9 +22,7 @@ defineProps<{
   tableData: TableDataPayload | null;
   tableDataPending: boolean;
   tableDataError: string;
-  newRowDraft: Record<string, string> | null;
   newRowPending: boolean;
-  dirtyRows: Record<string, Record<string, string>>;
   rowSavePending: Record<string, boolean>;
   structureDraft: ColumnSchemaDraft[];
   structurePending: boolean;
@@ -36,17 +34,13 @@ const emit = defineEmits<{
   "update:tableDetailTab": [tab: "data" | "structure"];
   "update:tableSearch": [value: string];
   search: [];
-  "add-row": [];
   page: [page: number];
-  "update-new-cell": [columnName: string, value: string];
-  "insert-row": [];
-  "reset-new-row": [];
-  "update-cell": [row: TableDataRow, columnName: string, value: string];
-  "save-row": [row: TableDataRow];
-  "reset-row": [row: TableDataRow];
+  "insert-row": [values: Record<string, string>];
+  "save-row": [row: TableDataRow, values: Record<string, string>];
   "delete-row": [row: TableDataRow];
   "add-column": [];
   "remove-column": [index: number];
+  "delete-table": [];
   "export-database": [];
   "export-table": [];
   "reset-structure": [];
@@ -91,7 +85,7 @@ const emit = defineEmits<{
     </v-card>
 
     <v-card class="studio-content-card d-flex flex-column" variant="flat">
-      <v-card-item>
+      <v-card-item class="studio-content-header">
         <template #prepend>
           <v-avatar color="secondary" variant="tonal">
             <v-icon :icon="tableDetailTab === 'data' ? 'mdi-table-edit' : 'mdi-table-cog'" />
@@ -117,6 +111,7 @@ const emit = defineEmits<{
       </v-card-item>
 
       <v-tabs
+        class="studio-tabs"
         :model-value="tableDetailTab"
         color="primary"
         density="comfortable"
@@ -136,20 +131,13 @@ const emit = defineEmits<{
           :table-data-pending="tableDataPending"
           :table-data-error="tableDataError"
           :table-search="tableSearch"
-          :new-row-draft="newRowDraft"
           :new-row-pending="newRowPending"
-          :dirty-rows="dirtyRows"
           :row-save-pending="rowSavePending"
           @update:table-search="emit('update:tableSearch', $event)"
           @search="emit('search')"
-          @add-row="emit('add-row')"
           @page="emit('page', $event)"
-          @update-new-cell="(columnName, value) => emit('update-new-cell', columnName, value)"
-          @insert-row="emit('insert-row')"
-          @reset-new-row="emit('reset-new-row')"
-          @update-cell="(row, columnName, value) => emit('update-cell', row, columnName, value)"
-          @save-row="emit('save-row', $event)"
-          @reset-row="emit('reset-row', $event)"
+          @insert-row="emit('insert-row', $event)"
+          @save-row="(row, values) => emit('save-row', row, values)"
           @delete-row="emit('delete-row', $event)"
         />
 
@@ -161,6 +149,7 @@ const emit = defineEmits<{
           database-type="sqlite"
           @add-column="emit('add-column')"
           @remove-column="emit('remove-column', $event)"
+          @delete-table="emit('delete-table')"
           @reset="emit('reset-structure')"
           @apply="emit('apply-structure')"
         />

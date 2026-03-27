@@ -41,9 +41,7 @@ const selectedTableName = ref("");
 const tableData = ref<TableDataPayload | null>(null);
 const tableDataPending = ref(false);
 const tableDataError = ref("");
-const newRowDraft = ref<Record<string, string> | null>(null);
 const newRowPending = ref(false);
-const dirtyRows = ref<Record<string, Record<string, string>>>({});
 const rowSavePending = ref<Record<string, boolean>>({});
 const tableSearch = ref("");
 const tableDetailTab = ref<"data" | "structure">("data");
@@ -79,8 +77,6 @@ watch(
     if (!sqliteSchema.value?.tables.length) {
       selectedTableName.value = "";
       tableData.value = null;
-      newRowDraft.value = null;
-      dirtyRows.value = {};
       structureDraft.value = [];
       return;
     }
@@ -143,7 +139,6 @@ function loadTableData(tableName = selectedTableName.value, page = 0, search = t
 
   tableDataPending.value = true;
   tableDataError.value = "";
-  newRowDraft.value = null;
   selectedTableName.value = tableName;
   tableSearch.value = search;
   resetStructureDraft();
@@ -159,88 +154,12 @@ function rowKeyId(row: TableDataRow): string {
   return JSON.stringify(row.rowKey);
 }
 
-function displayValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
-
-function originalValue(row: TableDataRow, columnName: string): string {
-  return displayValue(row.values[columnName]);
-}
-
-function updateDraft(row: TableDataRow, columnName: string, value: string): void {
-  const key = rowKeyId(row);
-  const original = originalValue(row, columnName);
-  const nextRowDraft = {
-    ...(dirtyRows.value[key] ?? {})
-  };
-
-  if (value === original) {
-    delete nextRowDraft[columnName];
-  } else {
-    nextRowDraft[columnName] = value;
-  }
-
-  const nextDirtyRows = {
-    ...dirtyRows.value
-  };
-
-  if (Object.keys(nextRowDraft).length === 0) {
-    delete nextDirtyRows[key];
-  } else {
-    nextDirtyRows[key] = nextRowDraft;
-  }
-
-  dirtyRows.value = nextDirtyRows;
-}
-
-function resetRowDraft(row: TableDataRow): void {
-  const next = { ...dirtyRows.value };
-  delete next[rowKeyId(row)];
-  dirtyRows.value = next;
-}
-
-function beginNewRow(): void {
-  if (!activeTable.value) {
-    return;
-  }
-
-  newRowDraft.value = Object.fromEntries(
-    activeTable.value.columns.map((column) => [column.name, column.defaultValue ?? ""])
-  );
-}
-
-function updateNewRowDraft(columnName: string, value: string): void {
-  newRowDraft.value = {
-    ...(newRowDraft.value ?? {}),
-    [columnName]: value
-  };
-}
-
-function resetNewRowDraft(): void {
-  newRowDraft.value = null;
-  newRowPending.value = false;
-}
-
-function saveRow(row: TableDataRow): void {
+function saveRow(row: TableDataRow, values: Record<string, string>): void {
   if (!selectedTableName.value) {
     return;
   }
 
   const key = rowKeyId(row);
-  const values = Object.fromEntries(
-    Object.entries(row.values).map(([columnName, value]) => [columnName, displayValue(value)])
-  );
-
-  Object.assign(values, dirtyRows.value[key] ?? {});
-
   rowSavePending.value = {
     ...rowSavePending.value,
     [key]: true
@@ -256,8 +175,8 @@ function saveRow(row: TableDataRow): void {
   });
 }
 
-function insertRow(): void {
-  if (!selectedTableName.value || !newRowDraft.value) {
+function insertRow(values: Record<string, string>): void {
+  if (!selectedTableName.value) {
     return;
   }
 
@@ -268,7 +187,7 @@ function insertRow(): void {
     tableName: selectedTableName.value,
     page: 0,
     search: tableSearch.value,
-    values: newRowDraft.value
+    values
   });
 }
 
@@ -293,6 +212,7 @@ function resetStructureDraft(): void {
     type: column.type || "",
     notNull: column.notNull,
     primaryKey: column.primaryKey,
+    unique: column.unique,
     defaultValue: column.defaultValue ?? ""
   }));
   structureError.value = "";
@@ -307,6 +227,7 @@ function addStructureColumn(): void {
       type: "TEXT",
       notNull: false,
       primaryKey: false,
+      unique: false,
       defaultValue: ""
     }
   ];
@@ -343,6 +264,13 @@ function exportDatabase(): void {
 function exportTable(): void {
   vscode?.postMessage({
     type: "exportTable",
+    tableName: selectedTableName.value
+  });
+}
+
+function deleteTable(): void {
+  vscode?.postMessage({
+    type: "deleteTable",
     tableName: selectedTableName.value
   });
 }
@@ -432,8 +360,6 @@ onMounted(() => {
       tableData.value = payload as TableDataPayload;
       selectedTableName.value = tableData.value.tableName;
       tableSearch.value = tableData.value.search;
-      newRowDraft.value = null;
-      dirtyRows.value = {};
       rowSavePending.value = {};
       return;
     }
@@ -509,9 +435,7 @@ onMounted(() => {
           :table-data="tableData"
           :table-data-pending="tableDataPending"
           :table-data-error="tableDataError"
-          :new-row-draft="newRowDraft"
           :new-row-pending="newRowPending"
-          :dirty-rows="dirtyRows"
           :row-save-pending="rowSavePending"
           :structure-draft="structureDraft"
           :structure-pending="structurePending"
@@ -520,17 +444,13 @@ onMounted(() => {
           @update:table-detail-tab="tableDetailTab = $event"
           @update:table-search="tableSearch = $event"
           @search="loadTableData(selectedTableName, 0, tableSearch)"
-          @add-row="beginNewRow"
           @page="loadTableData(selectedTableName, $event, tableSearch)"
-          @update-new-cell="updateNewRowDraft"
           @insert-row="insertRow"
-          @reset-new-row="resetNewRowDraft"
-          @update-cell="(row, columnName, value) => updateDraft(row, columnName, value)"
           @save-row="saveRow"
-          @reset-row="resetRowDraft"
           @delete-row="deleteRow"
           @add-column="addStructureColumn"
           @remove-column="removeStructureColumn"
+          @delete-table="deleteTable"
           @export-database="exportDatabase"
           @export-table="exportTable"
           @reset-structure="resetStructureDraft"
