@@ -162,7 +162,7 @@ function isRowDirty(row: TableDataRow): boolean {
 
 <template>
   <div class="table-tab-panel">
-    <div class="table-search-bar">
+    <div class="table-search-bar table-search-shell">
       <div class="search-input-wrap">
         <input
           :value="localSearch"
@@ -190,135 +190,68 @@ function isRowDirty(row: TableDataRow): boolean {
       <button type="button" class="button-ghost" @click="emit('add-row')">Add Row</button>
     </div>
 
-    <PaginationBar
-      :page="tableData?.page ?? 0"
-      :page-size="tableData?.pageSize ?? 30"
-      :total-rows="tableData?.totalRows ?? 0"
-      :pending="tableDataPending"
-      @page="emit('page', $event)"
-    />
-
     <p v-if="tableDataError" class="error">{{ tableDataError }}</p>
     <p v-else-if="tableDataPending" class="empty">Loading rows…</p>
 
-    <div v-else-if="newRowDraft || tableData?.rows.length" class="data-grid-wrap">
-      <table class="data-grid data-grid-rows">
-        <thead>
-          <tr>
-            <th v-for="column in activeTable?.columns ?? []" :key="column.name">{{ column.name }}</th>
-            <th class="action-head">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="newRowDraft">
-            <td v-for="column in activeTable?.columns ?? []" :key="`new:${column.name}`">
-              <input
-                v-if="isIntegerColumn(column.type)"
-                :value="newRowDraft[column.name] ?? ''"
-                class="grid-input integer-input dirty"
-                type="number"
-                step="1"
-                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-              />
-              <input
-                v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
-                :value="toTemporalInputValue(newRowDraft[column.name] ?? '', column.type)"
-                class="grid-input temporal-input dirty"
-                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                @input="emit(
-                  'update-new-cell',
-                  column.name,
-                  fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                )"
-              />
-              <input
-                v-else
-                :value="newRowDraft[column.name] ?? ''"
-                class="grid-input dirty"
-                type="text"
-                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-              />
-            </td>
-            <td class="row-actions action-cell">
-              <button
-                type="button"
-                class="icon-button icon-button-save"
-                :disabled="newRowPending"
-                title="Insert row"
-                @click="emit('insert-row')"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="icon-button"
-                title="Cancel new row"
-                @click="emit('reset-new-row')"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </button>
-            </td>
-          </tr>
-          <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
-            <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
-              <input
-                v-if="isIntegerColumn(column.type)"
-                :value="editableValue(row, column.name)"
-                class="grid-input integer-input"
-                :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                type="number"
-                step="1"
-                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-              />
-              <input
-                v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
-                :value="toTemporalInputValue(editableValue(row, column.name), column.type)"
-                class="grid-input temporal-input"
-                :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                @input="emit(
-                  'update-cell',
-                  row,
-                  column.name,
-                  fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
-                )"
-              />
-              <input
-                v-else
-                :value="editableValue(row, column.name)"
-                class="grid-input"
-                :class="{ dirty: isCellDirty(row, column.name) }"
-                :title="editableValue(row, column.name)"
-                type="text"
-                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-              />
-            </td>
-            <td class="row-actions action-cell">
-              <template v-if="isRowDirty(row)">
+    <div v-else-if="newRowDraft || tableData?.rows.length" class="table-results-shell">
+      <PaginationBar
+        :page="tableData?.page ?? 0"
+        :page-size="tableData?.pageSize ?? 30"
+        :total-rows="tableData?.totalRows ?? 0"
+        :pending="tableDataPending"
+        @page="emit('page', $event)"
+      />
+
+      <div class="data-grid-wrap">
+        <table class="data-grid data-grid-rows">
+          <thead>
+            <tr>
+              <th v-for="column in activeTable?.columns ?? []" :key="column.name">{{ column.name }}</th>
+              <th class="action-head">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="newRowDraft">
+              <td v-for="column in activeTable?.columns ?? []" :key="`new:${column.name}`">
+                <input
+                  v-if="isIntegerColumn(column.type)"
+                  :value="newRowDraft[column.name] ?? ''"
+                  class="grid-input integer-input dirty"
+                  type="number"
+                  step="1"
+                  @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
+                />
+                <input
+                  v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
+                  :value="toTemporalInputValue(newRowDraft[column.name] ?? '', column.type)"
+                  class="grid-input temporal-input dirty"
+                  :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
+                  :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
+                  @input="emit(
+                    'update-new-cell',
+                    column.name,
+                    fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
+                  )"
+                />
+                <input
+                  v-else
+                  :value="newRowDraft[column.name] ?? ''"
+                  class="grid-input dirty"
+                  type="text"
+                  @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
+                />
+              </td>
+              <td class="row-actions action-cell">
                 <button
                   type="button"
                   class="icon-button icon-button-save"
-                  :disabled="rowSavePending[rowKeyId(row)]"
-                  title="Save changes"
-                  @click="emit('save-row', row)"
+                  :disabled="newRowPending"
+                  title="Insert row"
+                  @click="emit('insert-row')"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path
-                      d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6M6 8V5h9v3z"
+                      d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"
                       fill="currentColor"
                     />
                   </svg>
@@ -326,34 +259,103 @@ function isRowDirty(row: TableDataRow): boolean {
                 <button
                   type="button"
                   class="icon-button"
-                  title="Reset changes"
-                  @click="emit('reset-row', row)"
+                  title="Cancel new row"
+                  @click="emit('reset-new-row')"
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path
-                      d="M12 5a7 7 0 1 1-6.93 8h2.02A5 5 0 1 0 12 7c-1.38 0-2.63.56-3.54 1.46L11 11H4V4l2.03 2.03A8.96 8.96 0 0 1 12 5"
+                      d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"
                       fill="currentColor"
                     />
                   </svg>
                 </button>
-              </template>
-              <button
-                type="button"
-                class="icon-button icon-button-danger"
-                title="Delete row"
-                @click="emit('delete-row', row)"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+              </td>
+            </tr>
+            <tr v-for="row in tableData.rows" :key="rowKeyId(row)">
+              <td v-for="column in activeTable?.columns ?? []" :key="`${rowKeyId(row)}:${column.name}`">
+                <input
+                  v-if="isIntegerColumn(column.type)"
+                  :value="editableValue(row, column.name)"
+                  class="grid-input integer-input"
+                  :class="{ dirty: isCellDirty(row, column.name) }"
+                  :title="editableValue(row, column.name)"
+                  type="number"
+                  step="1"
+                  @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
+                />
+                <input
+                  v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
+                  :value="toTemporalInputValue(editableValue(row, column.name), column.type)"
+                  class="grid-input temporal-input"
+                  :class="{ dirty: isCellDirty(row, column.name) }"
+                  :title="editableValue(row, column.name)"
+                  :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
+                  :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
+                  @input="emit(
+                    'update-cell',
+                    row,
+                    column.name,
+                    fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
+                  )"
+                />
+                <input
+                  v-else
+                  :value="editableValue(row, column.name)"
+                  class="grid-input"
+                  :class="{ dirty: isCellDirty(row, column.name) }"
+                  :title="editableValue(row, column.name)"
+                  type="text"
+                  @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
+                />
+              </td>
+              <td class="row-actions action-cell">
+                <template v-if="isRowDirty(row)">
+                  <button
+                    type="button"
+                    class="icon-button icon-button-save"
+                    :disabled="rowSavePending[rowKeyId(row)]"
+                    title="Save changes"
+                    @click="emit('save-row', row)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6M6 8V5h9v3z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="icon-button"
+                    title="Reset changes"
+                    @click="emit('reset-row', row)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M12 5a7 7 0 1 1-6.93 8h2.02A5 5 0 1 0 12 7c-1.38 0-2.63.56-3.54 1.46L11 11H4V4l2.03 2.03A8.96 8.96 0 0 1 12 5"
+                        fill="currentColor"
+                      />
+                    </svg>
+                  </button>
+                </template>
+                <button
+                  type="button"
+                  class="icon-button icon-button-danger"
+                  title="Delete row"
+                  @click="emit('delete-row', row)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
     <p v-else class="empty">No rows loaded for this table.</p>
   </div>
