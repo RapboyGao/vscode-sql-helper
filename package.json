@@ -156,6 +156,7 @@
     "clean": "bash scripts/clean.sh",
     "build": "bash scripts/build.sh",
     "build:vsix": "bash scripts/build-vsix.sh",
+    "download:bins": "bash scripts/download-platform-bins.sh",
     "build:extension": "bash scripts/build-extension.sh",
     "build:webview": "bash scripts/build-webview.sh",
     "build:rust": "bash scripts/build-rust.sh",

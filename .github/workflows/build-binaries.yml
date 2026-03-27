@@ -73,7 +73,7 @@ jobs:
           TARGET_TRIPLE: ${{ matrix.target }}
           BIN_PLATFORM: ${{ matrix.bin_platform }}
           BIN_ARCH: ${{ matrix.bin_arch }}
-        run: node scripts/copy-rust-binary.mjs
+        run: bash scripts/copy-rust-binary.sh
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v6
