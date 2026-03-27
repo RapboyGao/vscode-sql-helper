@@ -1,0 +1,20 @@
+.github/**
+.vscode/**
+crates/**
+node_modules/**
+src/**
+scripts/**
+webview/**
+dist/**/*.map
+tsconfig.json
+pnpm-lock.yaml
+.gitignore
+*.log
+
+# Keep packaged runtime assets
+!dist/extension.js
+!dist/webview/**
+!bin/**
+!media/**
+!README.md
+!package.json
