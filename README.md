@@ -28,3 +28,20 @@ Useful debug entries:
 
 - `Run SQL Helper Extension`: build first, then launch
 - `Run SQL Helper Extension (No Build)`: launch immediately if you already built
+
+## CI binaries
+
+GitHub Actions builds Rust binaries for these platform folders:
+
+- `bin/darwin-arm64/sql-analyzer`
+- `bin/linux-x64/sql-analyzer`
+- `bin/win32-x64/sql-analyzer.exe`
+
+Workflow file:
+
+- [.github/workflows/build-binaries.yml](/Users/albert/Documents/vscode-sql-helper/.github/workflows/build-binaries.yml)
+
+The workflow uploads:
+
+- one artifact per platform binary
+- one combined `sql-helper-platform-bins` artifact

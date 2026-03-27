@@ -1,0 +1,87 @@
+name: Build Platform Binaries
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            os: macos-14
+            bin_platform: darwin
+            bin_arch: arm64
+          - label: Linux x64
+            os: ubuntu-latest
+            bin_platform: linux
+            bin_arch: x64
+          - label: Windows x64
+            os: windows-latest
+            bin_platform: win32
+            bin_arch: x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Rust binary
+        run: cargo build --manifest-path crates/sql-analyzer/Cargo.toml --release
+
+      - name: Copy platform binary
+        env:
+          BIN_PLATFORM: ${{ matrix.bin_platform }}
+          BIN_ARCH: ${{ matrix.bin_arch }}
+        run: node scripts/copy-rust-binary.mjs
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-helper-bin-${{ matrix.bin_platform }}-${{ matrix.bin_arch }}
+          path: bin/${{ matrix.bin_platform }}-${{ matrix.bin_arch }}/
+          if-no-files-found: error
+
+  bundle:
+    name: Bundle Combined Binaries
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/platform-bins
+          pattern: sql-helper-bin-*
+          merge-multiple: false
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sql-helper-platform-bins
+          path: dist/platform-bins
+          if-no-files-found: error
