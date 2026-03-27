@@ -51,6 +51,7 @@ const visibleCount = computed(() => Math.max(1, Math.ceil(viewportHeight.value /
 const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - OVERSCAN));
 const endIndex = computed(() => Math.min(rows.value.length, startIndex.value + visibleCount.value + OVERSCAN * 2));
 const visibleRows = computed(() => rows.value.slice(startIndex.value, endIndex.value));
+const viewportKey = computed(() => [props.activeTable?.name ?? "", props.tableData?.page ?? 0, props.tableData?.search ?? ""].join(":"));
 
 watch(
   () => props.tableSearch,
@@ -419,7 +420,7 @@ function rowAriaLabel(row: TableDataRow): string {
         </div>
       </div>
 
-      <div ref="gridViewport" class="virtual-grid-shell" @scroll="handleViewportScroll">
+      <div :key="viewportKey" ref="gridViewport" class="virtual-grid-shell" @scroll="handleViewportScroll">
         <div class="virtual-grid-frame" :style="{ minWidth: '100%', width: 'max-content' }">
           <div class="virtual-grid-row virtual-grid-header" :style="{ gridTemplateColumns }">
             <div
