@@ -1576,10 +1576,15 @@ async function updateActiveTableRow(
     })
     .join(" AND ");
 
-  await runSqliteStatement(
+  const changedRows = await runSqliteCount(
     schema.path,
-    `UPDATE ${quoteSqliteIdentifier(table.name)} SET ${setClause} WHERE ${whereClause};`
+    `UPDATE ${quoteSqliteIdentifier(table.name)} SET ${setClause} WHERE ${whereClause}; SELECT changes() AS changed;`
   );
+
+  if (!changedRows) {
+    throw new Error("No rows were updated. The row identity may be stale or the target record no longer exists.");
+  }
+
   invalidateSchemaCache(schema.path);
   return loadActiveTableData(context, table.name, requestedPage, search);
 }
