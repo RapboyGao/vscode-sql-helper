@@ -40,9 +40,9 @@ else
 fi
 
 if [[ -n "$TARGET_TRIPLE" ]]; then
-  SOURCE="$ROOT_DIR/crates/sql-analyzer/target/$TARGET_TRIPLE/release/$EXECUTABLE"
+  SOURCE="$ROOT_DIR/rust/sql-analyzer/target/$TARGET_TRIPLE/release/$EXECUTABLE"
 else
-  SOURCE="$ROOT_DIR/crates/sql-analyzer/target/release/$EXECUTABLE"
+  SOURCE="$ROOT_DIR/rust/sql-analyzer/target/release/$EXECUTABLE"
 fi
 
 FALLBACK="$ROOT_DIR/target/release/$EXECUTABLE"

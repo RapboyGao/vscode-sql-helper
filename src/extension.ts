@@ -198,7 +198,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("sqlHelper.openAnalyzer", async () => {
       const panel = vscode.window.createWebviewPanel("sqlHelperAnalyzer", "SQL Helper", vscode.ViewColumn.One, {
         enableScripts: true,
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist", "webview")]
+        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist", "app")]
       });
 
       await configureWebview(context, panel.webview, undefined, "panel");
@@ -563,7 +563,7 @@ async function configureWebview(
 ): Promise<void> {
   webview.options = {
     enableScripts: true,
-    localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist", "webview")]
+    localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, "dist", "app")]
   };
   webview.html = await getWebviewHtml(webview, context.extensionUri);
 
@@ -1015,7 +1015,7 @@ function getParsedDocument(document: vscode.TextDocument): ParsedSql {
 }
 
 async function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri): Promise<string> {
-  const distPath = vscode.Uri.joinPath(extensionUri, "dist", "webview");
+  const distPath = vscode.Uri.joinPath(extensionUri, "dist", "app");
   const htmlRaw = await fs.readFile(distPath.fsPath + "/index.html", "utf8");
 
   return htmlRaw.replace(/(?:\.\/)?assets\/([^"]+)/g, (_match, assetPath: string) => {

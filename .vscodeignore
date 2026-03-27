@@ -1,10 +1,11 @@
 .github/**
 .vscode/**
-crates/**
+rust/**
 node_modules/**
 src/**
 scripts/**
-webview/**
+app/**
+dist/webview/**
 dist/**/*.map
 tsconfig.json
 pnpm-lock.yaml
@@ -13,8 +14,8 @@ pnpm-lock.yaml
 
 # Keep packaged runtime assets
 !dist/extension.js
-!dist/webview/**
+!dist/app/**
 !bin/**
-!media/**
+!assets/**
 !README.md
 !package.json

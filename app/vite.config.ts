@@ -8,7 +8,7 @@ export default defineConfig({
   root: path.resolve(__dirname),
   publicDir: false,
   build: {
-    outDir: path.resolve(__dirname, "../dist/webview"),
+    outDir: path.resolve(__dirname, "../dist/app"),
     emptyOutDir: true,
     assetsDir: "assets",
     rollupOptions: {

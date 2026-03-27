@@ -85,10 +85,10 @@ The runtime tries to use the bundled Rust analyzer first and falls back to the T
 
 ```text
 .
-├── crates/sql-analyzer/         # Rust analyzer binary
+├── rust/sql-analyzer/           # Rust analyzer binary
 ├── src/                         # VS Code extension host
-├── webview/src/                 # Vue UI for custom editor / panel
-├── media/                       # extension icon assets
+├── app/src/                     # Vue UI for custom editor / panel
+├── assets/                      # extension icon assets
 ├── scripts/                     # local build helpers
 ├── bin/                         # platform-specific analyzer binaries
 └── .github/workflows/           # CI build pipelines

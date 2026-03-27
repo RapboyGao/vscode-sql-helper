@@ -1,7 +1,7 @@
 {
   "name": "vscode-sql-helper",
   "displayName": "SQL Helper",
-  "description": "VS Code extension with Vue webview and Rust SQL analyzer.",
+  "description": "VS Code extension with Vue app UI and Rust SQL analyzer.",
   "version": "0.0.1",
   "publisher": "local",
   "license": "GPL-2.0-only",
@@ -20,12 +20,6 @@
   },
   "categories": [
     "Other"
-  ],
-  "activationEvents": [
-    "onCommand:sqlHelper.openAnalyzer",
-    "onCustomEditor:sqlHelper.sqliteViewer",
-    "onLanguage:sql",
-    "onView:sqlHelper.explorerView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -118,7 +112,7 @@
         {
           "id": "sqlHelper",
           "title": "SQL Helper",
-          "icon": "media/sql-helper.svg"
+          "icon": "assets/sql-helper.svg"
         }
       ]
     },
@@ -126,7 +120,8 @@
       "sqlHelper": [
         {
           "id": "sqlHelper.explorerView",
-          "name": "Explorer"
+          "name": "Explorer",
+          "icon": "assets/sql-helper.svg"
         }
       ]
     },
