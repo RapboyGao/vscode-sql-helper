@@ -158,6 +158,10 @@ function isCellDirty(row: TableDataRow, columnName: string): boolean {
 function isRowDirty(row: TableDataRow): boolean {
   return Object.keys(props.dirtyRows[rowKeyId(row)] ?? {}).length > 0;
 }
+
+function isReadonlyColumn(column: SqliteTable["columns"][number]): boolean {
+  return column.autoIncrement;
+}
 </script>
 
 <template>
@@ -213,33 +217,38 @@ function isRowDirty(row: TableDataRow): boolean {
           <tbody>
             <tr v-if="newRowDraft">
               <td v-for="column in activeTable?.columns ?? []" :key="`new:${column.name}`">
-                <input
-                  v-if="isIntegerColumn(column.type)"
-                  :value="newRowDraft[column.name] ?? ''"
-                  class="grid-input integer-input dirty"
-                  type="number"
-                  step="1"
-                  @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-                />
+              <input
+                v-if="isIntegerColumn(column.type)"
+                :value="newRowDraft[column.name] ?? ''"
+                class="grid-input integer-input dirty"
+                type="number"
+                step="1"
+                :disabled="isReadonlyColumn(column)"
+                :placeholder="isReadonlyColumn(column) ? 'Auto increment' : ''"
+                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
+              />
                 <input
                   v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
                   :value="toTemporalInputValue(newRowDraft[column.name] ?? '', column.type)"
-                  class="grid-input temporal-input dirty"
-                  :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                  :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                  @input="emit(
-                    'update-new-cell',
-                    column.name,
+                class="grid-input temporal-input dirty"
+                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
+                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
+                :disabled="isReadonlyColumn(column)"
+                @input="emit(
+                  'update-new-cell',
+                  column.name,
                     fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
                   )"
                 />
                 <input
                   v-else
-                  :value="newRowDraft[column.name] ?? ''"
-                  class="grid-input dirty"
-                  type="text"
-                  @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
-                />
+                :value="newRowDraft[column.name] ?? ''"
+                class="grid-input dirty"
+                type="text"
+                :disabled="isReadonlyColumn(column)"
+                :placeholder="isReadonlyColumn(column) ? 'Auto increment' : ''"
+                @input="emit('update-new-cell', column.name, ($event.target as HTMLInputElement).value)"
+              />
               </td>
               <td class="row-actions action-cell">
                 <button
@@ -277,23 +286,25 @@ function isRowDirty(row: TableDataRow): boolean {
                   v-if="isIntegerColumn(column.type)"
                   :value="editableValue(row, column.name)"
                   class="grid-input integer-input"
-                  :class="{ dirty: isCellDirty(row, column.name) }"
-                  :title="editableValue(row, column.name)"
-                  type="number"
-                  step="1"
-                  @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-                />
+                :class="{ dirty: isCellDirty(row, column.name) }"
+                :title="editableValue(row, column.name)"
+                type="number"
+                step="1"
+                :disabled="isReadonlyColumn(column)"
+                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
+              />
                 <input
                   v-else-if="isDateTimeColumn(column.type) || isDateColumn(column.type) || isTimeColumn(column.type)"
                   :value="toTemporalInputValue(editableValue(row, column.name), column.type)"
                   class="grid-input temporal-input"
                   :class="{ dirty: isCellDirty(row, column.name) }"
-                  :title="editableValue(row, column.name)"
-                  :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
-                  :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
-                  @input="emit(
-                    'update-cell',
-                    row,
+                :title="editableValue(row, column.name)"
+                :type="isDateTimeColumn(column.type) ? 'datetime-local' : isDateColumn(column.type) ? 'date' : 'time'"
+                :step="isDateTimeColumn(column.type) || isTimeColumn(column.type) ? 1 : undefined"
+                :disabled="isReadonlyColumn(column)"
+                @input="emit(
+                  'update-cell',
+                  row,
                     column.name,
                     fromTemporalInputValue(($event.target as HTMLInputElement).value, column.type)
                   )"
@@ -302,11 +313,12 @@ function isRowDirty(row: TableDataRow): boolean {
                   v-else
                   :value="editableValue(row, column.name)"
                   class="grid-input"
-                  :class="{ dirty: isCellDirty(row, column.name) }"
-                  :title="editableValue(row, column.name)"
-                  type="text"
-                  @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
-                />
+                :class="{ dirty: isCellDirty(row, column.name) }"
+                :title="editableValue(row, column.name)"
+                type="text"
+                :disabled="isReadonlyColumn(column)"
+                @input="emit('update-cell', row, column.name, ($event.target as HTMLInputElement).value)"
+              />
               </td>
               <td class="row-actions action-cell">
                 <template v-if="isRowDirty(row)">

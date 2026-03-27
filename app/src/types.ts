@@ -22,6 +22,7 @@ export type SqliteTableColumn = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  autoIncrement: boolean;
   defaultValue: string | null;
 };
 

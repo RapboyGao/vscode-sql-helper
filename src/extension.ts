@@ -97,6 +97,7 @@ type SqliteTableColumn = {
   type: string;
   notNull: boolean;
   primaryKey: boolean;
+  autoIncrement: boolean;
   defaultValue: string | null;
 };
 
@@ -1427,6 +1428,7 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
           type: column.type ?? "",
           notNull: column.notnull === 1,
           primaryKey: column.pk > 0,
+          autoIncrement: isAutoIncrementColumn(table.sql ?? "", column.name),
           defaultValue: column.dflt_value
         }))
       };
@@ -1445,6 +1447,24 @@ async function loadSqliteSchema(databasePath: string): Promise<SqliteSchema> {
   });
 
   return schema;
+}
+
+function isAutoIncrementColumn(createSql: string, columnName: string): boolean {
+  if (!/autoincrement/i.test(createSql)) {
+    return false;
+  }
+
+  const escapedName = escapeRegExp(columnName);
+  const patterns = [
+    new RegExp(`["\`]${escapedName}["\`][^,)]*autoincrement`, "i"),
+    new RegExp(`\\b${escapedName}\\b[^,)]*autoincrement`, "i")
+  ];
+
+  return patterns.some((pattern) => pattern.test(createSql));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function runSqliteJson<T>(databasePath: string, sql: string): Promise<T[]> {

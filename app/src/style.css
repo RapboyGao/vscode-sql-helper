@@ -455,6 +455,13 @@ button:disabled {
   padding: 0 12px;
 }
 
+.grid-input:disabled {
+  cursor: not-allowed;
+  color: var(--text-dim);
+  background: rgba(12, 18, 31, 0.72);
+  border-color: rgba(148, 163, 184, 0.08);
+}
+
 .integer-input {
   text-align: center;
 }
