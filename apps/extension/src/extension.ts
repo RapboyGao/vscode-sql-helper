@@ -12,7 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const connectionStore = new ConnectionStore(context);
   const logStore = new OperationLogStore(context);
   const nativeBridge = new NativeBridge(context, connectionStore);
-  const explorer = new DatabaseExplorerProvider(connectionStore, nativeBridge);
+  const explorer = new DatabaseExplorerProvider(connectionStore);
   const connectionPanel = new ConnectionDetailsPanel(context, connectionStore, logStore, nativeBridge, () => explorer.refresh());
   const tablePanel = new TableDataPanel(context, nativeBridge, logStore, () => explorer.refresh());
 

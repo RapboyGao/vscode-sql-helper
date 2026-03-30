@@ -10,6 +10,7 @@
     "test": "pnpm typecheck"
   },
   "dependencies": {
+    "@mdi/js": "^7.4.47",
     "@usd/shared": "workspace:*",
     "vue": "^3.5.13"
   },

@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import type { SavedConnection } from "@usd/shared";
 import { ConnectionStore } from "../storage/connectionStore.js";
-import { NativeBridge } from "../native/nativeBridge.js";
 import { DatabaseTreeNode } from "./explorerNodes.js";
 
 export class DatabaseExplorerProvider implements vscode.TreeDataProvider<DatabaseTreeNode> {
@@ -9,8 +8,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
   public readonly onDidChangeTreeData = this.emitter.event;
 
   public constructor(
-    private readonly connectionStore: ConnectionStore,
-    private readonly nativeBridge: NativeBridge
+    private readonly connectionStore: ConnectionStore
   ) {}
 
   public refresh(): void {
@@ -24,6 +22,8 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
   public async getChildren(element?: DatabaseTreeNode): Promise<DatabaseTreeNode[]> {
     if (!element) {
       return [
+        this.createActionNode("actionAddConnection", "add-connection", "Add Connection", "extension.addConnection"),
+        this.createActionNode("actionOpenSqlite", "open-sqlite", "Open SQLite File", "extension.openSQLiteFile"),
         new DatabaseTreeNode(
           "savedConnections",
           "saved-connections",
@@ -34,82 +34,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
     }
 
     if (element.kind === "savedConnections") {
-      const actionNodes = [
-        this.createActionNode("actionAddConnection", "add-connection", "Add Connection", "extension.addConnection"),
-        this.createActionNode("actionOpenSqlite", "open-sqlite", "Open SQLite File", "extension.openSQLiteFile")
-      ];
-      return [...actionNodes, ...this.connectionStore.list().map((connection) => this.createConnectionNode(connection))];
-    }
-
-    if (element.kind === "connection" && element.connection) {
-      const response = await this.nativeBridge.call<Record<string, never>, { schemas: string[] }>(element.connection, "listSchemas", {});
-      const schemas = response.success ? response.data?.schemas ?? [] : [];
-
-      if (!schemas.length) {
-        return [new DatabaseTreeNode("tables", `${element.id}-tables`, "Tables", vscode.TreeItemCollapsibleState.Collapsed, element.connection)];
-      }
-
-      return schemas.map(
-        (schema) => {
-          const node = new DatabaseTreeNode(
-            "schema",
-            `${element.id}-schema-${schema}`,
-            schema,
-            vscode.TreeItemCollapsibleState.Collapsed,
-            element.connection,
-            schema
-          );
-          return node;
-        }
-      );
-    }
-
-    if (element.kind === "schema" && element.connection) {
-      const response = await this.nativeBridge.call<{ schema?: string }, { tables: Array<{ name: string }> }>(element.connection, "listTables", { schema: element.schema });
-      const tables = response.success ? response.data?.tables ?? [] : [];
-      return tables.map(
-        (entry: { name: string }) => {
-          const node = new DatabaseTreeNode(
-            "table",
-            `${element.id}-table-${entry.name}`,
-            entry.name,
-            vscode.TreeItemCollapsibleState.None,
-            element.connection,
-            element.schema,
-            entry.name
-          );
-          node.command = {
-            command: "extension.openTableData",
-            title: "Open Table Data",
-            arguments: [{ connection: element.connection, schema: element.schema, table: entry.name }]
-          };
-          return node;
-        }
-      );
-    }
-
-    if (element.kind === "tables" && element.connection) {
-      const response = await this.nativeBridge.call<Record<string, never>, { tables: Array<{ name: string }> }>(element.connection, "listTables", {});
-      const tables = response.success ? response.data?.tables ?? [] : [];
-      return tables.map(
-        (entry: { name: string }) => {
-          const node = new DatabaseTreeNode(
-            "table",
-            `${element.id}-table-${entry.name}`,
-            entry.name,
-            vscode.TreeItemCollapsibleState.None,
-            element.connection,
-            undefined,
-            entry.name
-          );
-          node.command = {
-            command: "extension.openTableData",
-            title: "Open Table Data",
-            arguments: [{ connection: element.connection, table: entry.name }]
-          };
-          return node;
-        }
-      );
+      return this.connectionStore.list().map((connection) => this.createConnectionNode(connection));
     }
 
     return [];
@@ -121,15 +46,19 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
       "connection",
       connection.id,
       connection.name,
-      vscode.TreeItemCollapsibleState.Collapsed,
+      vscode.TreeItemCollapsibleState.None,
       connection
     );
     node.description = description;
     node.tooltip = description;
+    node.accessibilityInformation = {
+      label: connection.name,
+      role: "treeitem"
+    };
     node.command = {
-      command: "extension.openConnectionDetails",
-      title: "Open Connection Details",
-      arguments: [connection.id]
+      command: "extension.openTableData",
+      title: "Open Database",
+      arguments: [{ connection: { id: connection.id } }]
     };
     return node;
   }
@@ -141,6 +70,12 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
     command: string
   ): DatabaseTreeNode {
     const node = new DatabaseTreeNode(kind, id, label, vscode.TreeItemCollapsibleState.None);
+    node.actionCommand = command;
+    node.tooltip = label;
+    node.accessibilityInformation = {
+      label,
+      role: "button"
+    };
     node.command = {
       command,
       title: label

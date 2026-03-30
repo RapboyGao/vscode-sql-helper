@@ -3,6 +3,7 @@ import type {
   DescribeTableResult,
   NativeError,
   OperationLogEntry,
+  PendingTableChange,
   SavedConnection,
   SchemaListResult,
   SqlPreview,
@@ -56,6 +57,12 @@ export type ExtensionToWebviewMessage =
       payload: {
         query: TableQuery;
         result: TableQueryResult;
+      };
+    }
+  | {
+      type: "tableData/appliedChanges";
+      payload: {
+        appliedCount: number;
       };
     }
   | {
@@ -123,6 +130,14 @@ export type WebviewToExtensionMessage =
       };
     }
   | {
+      type: "tableData/applyChanges";
+      payload: {
+        schema?: string;
+        table: string;
+        changes: PendingTableChange[];
+      };
+    }
+  | {
       type: "schema/preview";
       payload: {
         action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn";
@@ -146,4 +161,3 @@ export type WebviewToExtensionMessage =
         definition?: Partial<TableSchema>;
       };
     };
-

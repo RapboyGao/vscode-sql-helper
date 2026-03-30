@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { mdiContentSave, mdiDeleteOutline, mdiDatabaseCheckOutline } from "@mdi/js";
 import type { ConnectionFormState, SavedConnection } from "@usd/shared";
+import MdiIcon from "./MdiIcon.vue";
 
 defineProps<{
   connection: SavedConnection;
@@ -23,8 +25,12 @@ const emit = defineEmits<{
         <h1>{{ connection.name }}</h1>
       </div>
       <div class="actions">
-        <button class="secondary" @click="emit('test', form)">Test Connection</button>
-        <button @click="emit('save', form)">Save</button>
+        <button class="secondary icon-button" title="Test Connection" aria-label="Test Connection" @click="emit('test', form)">
+          <MdiIcon :path="mdiDatabaseCheckOutline" />
+        </button>
+        <button class="icon-button" title="Save Connection" aria-label="Save Connection" @click="emit('save', form)">
+          <MdiIcon :path="mdiContentSave" />
+        </button>
       </div>
     </header>
 
@@ -90,7 +96,9 @@ const emit = defineEmits<{
     <section class="log-card">
       <div class="subheader">
         <h2>Recent Operations</h2>
-        <button class="danger" @click="emit('remove', connection.id)">Delete Connection</button>
+        <button class="danger icon-button" title="Delete Connection" aria-label="Delete Connection" @click="emit('remove', connection.id)">
+          <MdiIcon :path="mdiDeleteOutline" />
+        </button>
       </div>
       <ul v-if="logs.length" class="log-list">
         <li v-for="log in logs" :key="log.id">
@@ -104,4 +112,3 @@ const emit = defineEmits<{
     </section>
   </section>
 </template>
-

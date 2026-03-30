@@ -148,6 +148,29 @@ export interface TableQueryResult {
   primaryKeys: string[];
 }
 
+export interface PendingTableInsert {
+  kind: "insert";
+  tempId: string;
+  row: Record<string, unknown>;
+}
+
+export interface PendingTableUpdate {
+  kind: "update";
+  rowKey: string;
+  key: Record<string, unknown>;
+  originalRow: Record<string, unknown>;
+  values: Record<string, unknown>;
+}
+
+export interface PendingTableDelete {
+  kind: "delete";
+  rowKey: string;
+  key: Record<string, unknown>;
+  row: Record<string, unknown>;
+}
+
+export type PendingTableChange = PendingTableInsert | PendingTableUpdate | PendingTableDelete;
+
 export interface SqlPreview {
   title: string;
   statements: string[];
@@ -193,4 +216,3 @@ export interface DescribeTableResult {
   schema?: string;
   table: TableSchema;
 }
-

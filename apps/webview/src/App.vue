@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import type {
   ConnectionFormState,
   ExtensionToWebviewMessage,
+  PendingTableChange,
   SavedConnection,
   TableQuery,
   TableQueryResult,
@@ -29,6 +30,7 @@ const structure = ref<TableSchema | undefined>();
 const sqlPreview = ref<{ title: string; statements: string[] } | null>(null);
 const message = ref<string>("");
 const isError = ref(false);
+const applySignal = ref(0);
 
 function post(payload: WebviewToExtensionMessage): void {
   vscode?.postMessage(payload);
@@ -76,6 +78,10 @@ onMounted(() => {
       case "schema/result":
         structure.value = next.payload.table.table;
         break;
+      case "tableData/appliedChanges":
+        applySignal.value += 1;
+        showNotice(`${next.payload.appliedCount} pending change(s) applied`);
+        break;
       case "schema/sqlPreview":
         sqlPreview.value = next.payload;
         break;
@@ -119,9 +125,9 @@ onMounted(() => {
       :structure="structure"
       :logs="logs"
       :sql-preview="sqlPreview"
+      :apply-signal="applySignal"
       @query="post({ type: 'tableData/query', payload: $event })"
-      @insert="post({ type: 'tableData/insert', payload: $event })"
-      @remove="post({ type: 'tableData/delete', payload: $event })"
+      @applyChanges="post({ type: 'tableData/applyChanges', payload: $event })"
       @preview="post({ type: 'schema/preview', payload: $event })"
       @apply="post({ type: 'schema/apply', payload: $event })"
     />

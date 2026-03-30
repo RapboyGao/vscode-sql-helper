@@ -4,6 +4,8 @@ import type { SavedConnection } from "@usd/shared";
 export type TreeNodeKind = "savedConnections" | "actionAddConnection" | "actionOpenSqlite" | "connection" | "schema" | "tables" | "table" | "column";
 
 export class DatabaseTreeNode extends vscode.TreeItem {
+  public actionCommand?: string;
+
   public constructor(
     public readonly kind: TreeNodeKind,
     public readonly idValue: string,

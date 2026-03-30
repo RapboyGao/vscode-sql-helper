@@ -8,6 +8,7 @@ import { renderWebviewHtml } from "./webviewHtml.js";
 export class ConnectionDetailsPanel {
   public static readonly viewType = "databaseManager.connectionDetails";
   private panel?: vscode.WebviewPanel;
+  private currentConnectionId?: string;
 
   public constructor(
     private readonly context: vscode.ExtensionContext,
@@ -35,6 +36,7 @@ export class ConnectionDetailsPanel {
       );
 
       this.panel.onDidDispose(() => {
+        this.currentConnectionId = undefined;
         this.panel = undefined;
       });
 
@@ -43,6 +45,7 @@ export class ConnectionDetailsPanel {
       });
     }
 
+    this.currentConnectionId = connection.id;
     this.panel.title = `Connection: ${connection.name}`;
     this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, connection.name);
     await this.postBootstrap(connection.id);
@@ -107,5 +110,12 @@ export class ConnectionDetailsPanel {
       this.panel.dispose();
     }
   }
-}
 
+  public closeIfConnection(connectionId: string): void {
+    if (!this.panel || this.currentConnectionId !== connectionId) {
+      return;
+    }
+
+    this.panel.dispose();
+  }
+}

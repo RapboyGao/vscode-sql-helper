@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type {
   DescribeTableResult,
   ExtensionToWebviewMessage,
+  PendingTableChange,
   SavedConnection,
   TableQuery,
   WebviewToExtensionMessage
@@ -67,6 +68,14 @@ export class TableDataPanel {
     }
   }
 
+  public closeIfConnection(connectionId: string): void {
+    if (!this.panel || !this.connection || this.connection.id !== connectionId) {
+      return;
+    }
+
+    this.panel.dispose();
+  }
+
   private async postBootstrap(): Promise<void> {
     if (!this.panel || !this.connection) {
       return;
@@ -124,17 +133,74 @@ export class TableDataPanel {
     }
 
     if (message.type === "tableData/query") {
+      const schemasResponse = await this.nativeBridge.call<Record<string, never>, { schemas: string[] }>(
+        this.connection,
+        "listSchemas",
+        {}
+      );
+
+      const tablesResponse = await this.nativeBridge.call<{ schema?: string }, { tables: Array<{ name: string }> }>(
+        this.connection,
+        "listTables",
+        message.payload.schema ? { schema: message.payload.schema } : {}
+      );
+
+      if (!message.payload.table) {
+        await this.panel.webview.postMessage({
+          type: "tableData/bootstrap",
+          payload: {
+            connection: this.connection,
+            schemas: {
+              schemas: schemasResponse.success ? schemasResponse.data?.schemas ?? [] : []
+            },
+            tables: {
+              schema: message.payload.schema,
+              tables: tablesResponse.success ? tablesResponse.data?.tables ?? [] : []
+            },
+            selectedSchema: message.payload.schema,
+            selectedTable: undefined,
+            query: message.payload,
+            result: undefined,
+            structure: undefined,
+            logs: this.logStore.listForConnection(this.connection.name)
+          }
+        } satisfies ExtensionToWebviewMessage);
+        return;
+      }
+
       const response = await this.nativeBridge.call<TableQuery, import("@usd/shared").TableQueryResult>(
         this.connection,
         "queryTableData",
         message.payload
       );
+
       if (response.success && response.data) {
+        const structureResponse = await this.nativeBridge.call<{ schema?: string; table: string }, DescribeTableResult>(
+          this.connection,
+          "describeTable",
+          {
+            schema: message.payload.schema,
+            table: message.payload.table
+          }
+        );
+
         await this.panel.webview.postMessage({
-          type: "tableData/result",
+          type: "tableData/bootstrap",
           payload: {
+            connection: this.connection,
+            schemas: {
+              schemas: schemasResponse.success ? schemasResponse.data?.schemas ?? [] : []
+            },
+            tables: {
+              schema: message.payload.schema,
+              tables: tablesResponse.success ? tablesResponse.data?.tables ?? [] : []
+            },
+            selectedSchema: message.payload.schema,
+            selectedTable: message.payload.table,
             query: message.payload,
-            result: response.data
+            result: response.data,
+            structure: structureResponse.success ? structureResponse.data?.table : undefined,
+            logs: this.logStore.listForConnection(this.connection.name)
           }
         } satisfies ExtensionToWebviewMessage);
       }
@@ -191,5 +257,64 @@ export class TableDataPanel {
       });
       await this.postBootstrap();
     }
+
+    if (message.type === "tableData/applyChanges") {
+      const appliedCount = await this.applyPendingChanges(message.payload.changes, message.payload.schema, message.payload.table);
+      await this.panel.webview.postMessage({
+        type: "tableData/appliedChanges",
+        payload: {
+          appliedCount
+        }
+      } satisfies ExtensionToWebviewMessage);
+      await this.postBootstrap();
+    }
+  }
+
+  private async applyPendingChanges(changes: PendingTableChange[], schema: string | undefined, table: string): Promise<number> {
+    if (!this.connection) {
+      return 0;
+    }
+
+    let appliedCount = 0;
+
+    for (const change of changes) {
+      const response =
+        change.kind === "insert"
+          ? await this.nativeBridge.call(this.connection, "insertRows", {
+              schema,
+              table,
+              rows: [change.row]
+            })
+          : change.kind === "update"
+            ? await this.nativeBridge.call(this.connection, "updateRows", {
+                schema,
+                table,
+                key: change.key,
+                values: change.values
+              })
+            : await this.nativeBridge.call(this.connection, "deleteRows", {
+                schema,
+                table,
+                key: change.key
+              });
+
+      if (!response.success) {
+        await this.panel?.webview.postMessage({
+          type: "ui/error",
+          payload: response.error ?? { code: "UNKNOWN", message: "Failed to apply pending changes" }
+        } satisfies ExtensionToWebviewMessage);
+        break;
+      }
+
+      appliedCount += 1;
+      await this.logStore.append({
+        connectionName: this.connection.name,
+        objectName: table,
+        operation: change.kind,
+        success: true
+      });
+    }
+
+    return appliedCount;
   }
 }

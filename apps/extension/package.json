@@ -74,43 +74,21 @@
       }
     ],
     "menus": {
-      "view/title": [
-        {
-          "command": "extension.addConnection",
-          "when": "view == databaseManager.savedConnections",
-          "group": "navigation"
-        },
-        {
-          "command": "extension.openSQLiteFile",
-          "when": "view == databaseManager.savedConnections",
-          "group": "navigation@1"
-        },
-        {
-          "command": "extension.refreshExplorer",
-          "when": "view == databaseManager.savedConnections",
-          "group": "navigation@2"
-        }
-      ],
       "view/item/context": [
         {
           "command": "extension.openConnectionDetails",
           "when": "view == databaseManager.savedConnections && viewItem == connection",
-          "group": "inline"
+          "group": "navigation"
         },
         {
           "command": "extension.editConnection",
           "when": "view == databaseManager.savedConnections && viewItem == connection",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "extension.removeConnection",
           "when": "view == databaseManager.savedConnections && viewItem == connection",
           "group": "modification"
-        },
-        {
-          "command": "extension.openTableData",
-          "when": "view == databaseManager.savedConnections && viewItem == table",
-          "group": "inline"
         }
       ],
       "explorer/context": [
