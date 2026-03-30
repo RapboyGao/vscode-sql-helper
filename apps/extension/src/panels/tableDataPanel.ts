@@ -88,7 +88,9 @@ export class TableDataPanel {
       "listTables",
       selectedSchema ? { schema: selectedSchema } : {}
     );
-    const selectedTable = this.selectedTable;
+    const selectedTable = this.selectedTable ?? tablesResponse.data?.tables?.[0]?.name;
+    this.selectedSchema = selectedSchema;
+    this.selectedTable = selectedTable;
     const query: TableQuery = {
       ...DEFAULT_QUERY,
       schema: selectedSchema,
@@ -146,6 +148,52 @@ export class TableDataPanel {
       );
 
       if (!message.payload.table) {
+        const defaultTable = tablesResponse.success ? tablesResponse.data?.tables?.[0]?.name : undefined;
+        if (defaultTable) {
+          const nextQuery: TableQuery = {
+            ...message.payload,
+            table: defaultTable
+          };
+          this.selectedSchema = message.payload.schema;
+          this.selectedTable = defaultTable;
+
+          const response = await this.nativeBridge.call<TableQuery, import("@usd/shared").TableQueryResult>(
+            this.connection,
+            "queryTableData",
+            nextQuery
+          );
+
+          const structureResponse = await this.nativeBridge.call<{ schema?: string; table: string }, DescribeTableResult>(
+            this.connection,
+            "describeTable",
+            {
+              schema: message.payload.schema,
+              table: defaultTable
+            }
+          );
+
+          await this.panel.webview.postMessage({
+            type: "tableData/bootstrap",
+            payload: {
+              connection: this.connection,
+              schemas: {
+                schemas: schemasResponse.success ? schemasResponse.data?.schemas ?? [] : []
+              },
+              tables: {
+                schema: message.payload.schema,
+                tables: tablesResponse.success ? tablesResponse.data?.tables ?? [] : []
+              },
+              selectedSchema: message.payload.schema,
+              selectedTable: defaultTable,
+              query: nextQuery,
+              result: response.success ? response.data : undefined,
+              structure: structureResponse.success ? structureResponse.data?.table : undefined,
+              logs: this.logStore.listForConnection(this.connection.name)
+            }
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
         await this.panel.webview.postMessage({
           type: "tableData/bootstrap",
           payload: {

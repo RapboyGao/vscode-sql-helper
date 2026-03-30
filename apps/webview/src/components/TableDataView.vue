@@ -27,6 +27,7 @@ import type {
   TableSchema
 } from "@usd/shared";
 import MdiIcon from "./MdiIcon.vue";
+import DateTimeEditor from "./DateTimeEditor.vue";
 
 type RowDraftMap = Record<string, Record<string, unknown>>;
 type DeleteMap = Record<string, boolean>;
@@ -60,6 +61,7 @@ const emit = defineEmits<{
 
 const activeTab = ref<"structure" | "data" | "pending" | "logs">("data");
 const keyword = ref(props.query.keyword ?? "");
+const selectedSearchColumn = ref<string>("__all__");
 const selectedSchema = ref(props.selectedSchema ?? props.schemas[0] ?? "");
 const selectedTable = ref(props.selectedTable ?? props.tables[0] ?? "");
 const pageInput = ref(String((props.query.page ?? 0) + 1));
@@ -93,10 +95,30 @@ watch(
   () => props.query,
   (value) => {
     keyword.value = value.keyword ?? "";
+    const selectedFilter = value.filters?.find((filter) => filter.operator === "contains" && typeof filter.value === "string");
+    selectedSearchColumn.value = selectedFilter?.column ?? "__all__";
     pageInput.value = String((value.page ?? 0) + 1);
     pageSize.value = String(value.pageSize ?? 50);
   },
   { deep: true }
+);
+
+watch(
+  () => [props.connection.id, props.selectedSchema, props.selectedTable] as const,
+  (next, previous) => {
+    if (!previous) {
+      return;
+    }
+
+    if (next[0] === previous[0] && next[1] === previous[1] && next[2] === previous[2]) {
+      return;
+    }
+
+    clearAllPending();
+    selectedSearchColumn.value = "__all__";
+    textEditor.value = null;
+    activeTab.value = "data";
+  }
 );
 
 watch(
@@ -122,6 +144,9 @@ const totalPages = computed(() => {
 const currentPage = computed(() => (props.result?.page ?? props.query.page ?? 0) + 1);
 const pageOffset = computed(() => (props.result?.page ?? props.query.page ?? 0) * (props.result?.pageSize ?? props.query.pageSize ?? 50));
 const visibleColumns = computed(() => props.result?.columns ?? props.structure?.columns ?? []);
+const searchableColumns = computed(() =>
+  visibleColumns.value.filter((column) => /(char|text|clob|json|uuid|varchar)/i.test(column.dataType))
+);
 
 const pendingUpdates = computed<PendingTableUpdate[]>(() => {
   if (!props.result) {
@@ -278,6 +303,11 @@ function isEditableColumn(columnName: string): boolean {
   return !column?.autoIncrement;
 }
 
+function isWideIdentityColumn(columnName: string): boolean {
+  const column = columnSchema(columnName);
+  return Boolean(column?.primaryKey || column?.autoIncrement || /^id$/i.test(columnName) || /_id$/i.test(columnName));
+}
+
 function normalizeCellValue(columnName: string, value: unknown): string | boolean {
   const kind = columnInputKind(columnName);
   if (kind === "checkbox") {
@@ -316,7 +346,7 @@ function formatDateTimeValue(value: unknown): string {
   }
 
   const normalized = text.replace(" ", "T").replace(/Z$/, "");
-  return normalized.length >= 16 ? normalized.slice(0, 16) : normalized;
+  return normalized.length >= 23 ? normalized.slice(0, 23) : normalized;
 }
 
 function cellDisplayValue(row: Record<string, unknown>, columnName: string): string | boolean {
@@ -345,6 +375,31 @@ function handleCellInput(row: Record<string, unknown>, columnName: string, event
   setDraftValue(row, columnName, target.value);
 }
 
+function handleInsertDraftInput(columnName: string, event: Event): void {
+  const target = event.target as HTMLInputElement | HTMLTextAreaElement;
+  const kind = columnInputKind(columnName);
+
+  if (kind === "checkbox") {
+    insertDraft.value = {
+      ...insertDraft.value,
+      [columnName]: (target as HTMLInputElement).checked ? "true" : ""
+    };
+    return;
+  }
+
+  insertDraft.value = {
+    ...insertDraft.value,
+    [columnName]: target.value
+  };
+}
+
+function setInsertDraftValue(columnName: string, value: string): void {
+  insertDraft.value = {
+    ...insertDraft.value,
+    [columnName]: value
+  };
+}
+
 function openTextEditor(row: Record<string, unknown>, columnName: string): void {
   textEditor.value = {
     row,
@@ -371,12 +426,30 @@ function textButtonLabel(row: Record<string, unknown>, columnName: string): stri
   return value || "Edit text";
 }
 
+function openInsertTextEditor(columnName: string): void {
+  textEditor.value = {
+    row: insertDraft.value,
+    columnName,
+    value: String(insertDraft.value[columnName] ?? "")
+  };
+}
+
 function emitQuery(nextPage = 0): void {
+  const useAllColumns = selectedSearchColumn.value === "__all__";
   emit("query", {
     ...props.query,
     schema: selectedSchema.value || undefined,
     table: selectedTable.value,
-    keyword: keyword.value,
+    keyword: useAllColumns ? keyword.value : "",
+    filters: !useAllColumns && keyword.value
+      ? [
+          {
+            column: selectedSearchColumn.value,
+            operator: "contains",
+            value: keyword.value
+          }
+        ]
+      : undefined,
     page: nextPage,
     pageSize: Number(pageSize.value)
   });
@@ -483,7 +556,8 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
   }
 
   return {
-    "changed-cell": Object.prototype.hasOwnProperty.call(change.values, column)
+    "changed-cell": Object.prototype.hasOwnProperty.call(change.values, column),
+    "pending-updated-cell": Object.prototype.hasOwnProperty.call(change.values, column)
   };
 }
 
@@ -565,6 +639,12 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
         <div class="card">
           <div class="data-tools">
             <div class="search-toolbar">
+              <select v-model="selectedSearchColumn">
+                <option value="__all__">All</option>
+                <option v-for="column in searchableColumns" :key="column.name" :value="column.name">
+                  {{ column.name }}
+                </option>
+              </select>
               <input v-model="keyword" placeholder="Search keyword" @keydown.enter="emitQuery(0)" />
               <button class="icon-button" title="Run Query" aria-label="Run Query" @click="emitQuery(0)">
                 <MdiIcon :path="mdiMagnify" />
@@ -600,7 +680,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               <thead>
                 <tr>
                   <th class="index-column">#</th>
-                  <th v-for="column in visibleColumns" :key="column.name">{{ column.name }}</th>
+                  <th
+                    v-for="column in visibleColumns"
+                    :key="column.name"
+                    :class="{ 'identity-cell': isWideIdentityColumn(column.name) }"
+                  >
+                    {{ column.name }}
+                  </th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -621,11 +707,19 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       'changed-cell': entry.kind === 'insert'
                         ? String(entry.row[column.name] ?? '') !== ''
                         : cellChanged(entry.row, column.name),
-                      'deleted-cell': entry.kind === 'existing' && pendingDeletes[entry.id]
+                      'deleted-cell': entry.kind === 'existing' && pendingDeletes[entry.id],
+                      'identity-cell': isWideIdentityColumn(column.name)
                     }"
                   >
+                    <DateTimeEditor
+                      v-if="columnInputKind(column.name) === 'datetime-local'"
+                      :model-value="String(cellDisplayValue(entry.row, column.name))"
+                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
+                      placeholder="Set datetime"
+                      @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
+                    />
                     <input
-                      v-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
+                      v-else-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
                       :type="columnInputKind(column.name)"
                       :value="String(cellDisplayValue(entry.row, column.name))"
                       :class="{
@@ -633,7 +727,8 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                           ? String(entry.row[column.name] ?? '') !== ''
                           : cellChanged(entry.row, column.name),
                         'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id],
-                        'readonly-input': !isEditableColumn(column.name)
+                        'readonly-input': !isEditableColumn(column.name),
+                        'identity-input': isWideIdentityColumn(column.name)
                       }"
                       :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
                       @input="entry.kind === 'existing' && isEditableColumn(column.name) && handleCellInput(entry.row, column.name, $event)"
@@ -734,10 +829,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                           {{ change.row[column.name] ?? "" }}
                         </template>
                         <template v-else>
-                          <div class="pending-diff-cell">
-                            <span class="before">{{ change.originalRow[column.name] ?? "" }}</span>
-                            <span class="after">{{ change.values[column.name] ?? change.originalRow[column.name] ?? "" }}</span>
-                          </div>
+                          {{ change.values[column.name] ?? change.originalRow[column.name] ?? "" }}
                         </template>
                       </td>
                     </tr>
@@ -759,7 +851,39 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
           <div class="grid">
             <label v-for="column in visibleColumns" :key="column.name">
               <span>{{ column.name }}</span>
-              <input v-model="insertDraft[column.name]" />
+              <input
+                v-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox' && columnInputKind(column.name) !== 'datetime-local'"
+                :type="columnInputKind(column.name)"
+                :value="String(insertDraft[column.name] ?? '')"
+                :disabled="!isEditableColumn(column.name)"
+                :class="{ 'readonly-input': !isEditableColumn(column.name), 'identity-input': isWideIdentityColumn(column.name) }"
+                @input="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
+              />
+              <DateTimeEditor
+                v-else-if="columnInputKind(column.name) === 'datetime-local'"
+                :model-value="String(insertDraft[column.name] ?? '')"
+                :disabled="!isEditableColumn(column.name)"
+                placeholder="Set datetime"
+                @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
+              />
+              <input
+                v-else-if="columnInputKind(column.name) === 'checkbox'"
+                type="checkbox"
+                :checked="Boolean(insertDraft[column.name])"
+                :disabled="!isEditableColumn(column.name)"
+                :class="{ 'readonly-input': !isEditableColumn(column.name) }"
+                @change="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
+              />
+              <button
+                v-else
+                type="button"
+                class="text-link-button"
+                :disabled="!isEditableColumn(column.name)"
+                :class="{ 'readonly-input': !isEditableColumn(column.name) }"
+                @click="isEditableColumn(column.name) && openInsertTextEditor(column.name)"
+              >
+                {{ String(insertDraft[column.name] ?? '').trim() || "Edit text" }}
+              </button>
             </label>
           </div>
         </div>

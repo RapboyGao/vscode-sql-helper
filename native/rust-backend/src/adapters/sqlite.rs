@@ -100,15 +100,44 @@ pub async fn query_table_data(pool: &SqlitePool, payload: &Value) -> Result<Valu
         .filter_map(|column| column.get("name").and_then(Value::as_str))
         .collect::<Vec<_>>();
 
-    let search_clause = if keyword.is_empty() || column_names.is_empty() {
-        String::new()
-    } else {
+    let mut where_clauses = Vec::new();
+
+    if !keyword.is_empty() && !column_names.is_empty() {
         let filters = column_names
             .iter()
             .map(|name| format!("CAST(\"{}\" AS TEXT) LIKE '%{}%'", name.replace('"', "\"\""), keyword.replace('\'', "''")))
             .collect::<Vec<_>>()
             .join(" OR ");
-        format!(" WHERE {filters}")
+        where_clauses.push(format!("({filters})"));
+    }
+
+    if let Some(filters) = payload.get("filters").and_then(Value::as_array) {
+        for filter in filters {
+            let column = filter.get("column").and_then(Value::as_str).ok_or_else(|| anyhow!("filter column is required"))?;
+            let operator = filter.get("operator").and_then(Value::as_str).unwrap_or("contains");
+            let value = filter.get("value").and_then(Value::as_str).unwrap_or("");
+            let safe_column = column.replace('"', "\"\"");
+            let escaped_value = value.replace('\'', "''");
+
+            let clause = match operator {
+                "=" | "!=" | ">" | "<" | ">=" | "<=" => {
+                    format!("\"{}\" {} '{}'", safe_column, operator, escaped_value)
+                }
+                "startsWith" => format!("CAST(\"{}\" AS TEXT) LIKE '{}%'", safe_column, escaped_value),
+                "endsWith" => format!("CAST(\"{}\" AS TEXT) LIKE '%{}'", safe_column, escaped_value),
+                "isNull" => format!("\"{}\" IS NULL", safe_column),
+                "contains" => format!("CAST(\"{}\" AS TEXT) LIKE '%{}%'", safe_column, escaped_value),
+                _ => format!("CAST(\"{}\" AS TEXT) LIKE '%{}%'", safe_column, escaped_value),
+            };
+
+            where_clauses.push(clause);
+        }
+    }
+
+    let search_clause = if where_clauses.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", where_clauses.join(" AND "))
     };
 
     let count_sql = format!("SELECT COUNT(*) as total FROM \"{}\"{}", table.replace('"', "\"\""), search_clause);

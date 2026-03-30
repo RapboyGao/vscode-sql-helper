@@ -58,6 +58,16 @@ const emit = defineEmits<{
           <MdiIcon :path="mdiContentSave" />
           <span>{{ busyAction === "save" ? "Saving..." : "Save" }}</span>
         </button>
+        <button
+          class="danger action-button"
+          :disabled="busyAction !== null"
+          title="Delete Connection"
+          aria-label="Delete Connection"
+          @click="emit('remove', connection.id)"
+        >
+          <MdiIcon :path="mdiDeleteOutline" />
+          <span>Delete</span>
+        </button>
       </div>
     </header>
 
@@ -148,9 +158,6 @@ const emit = defineEmits<{
         <section class="card log-card">
           <div class="subheader">
             <h2>Recent Operations</h2>
-            <button class="danger icon-button" title="Delete Connection" aria-label="Delete Connection" @click="emit('remove', connection.id)">
-              <MdiIcon :path="mdiDeleteOutline" />
-            </button>
           </div>
           <ul v-if="logs.length" class="log-list">
             <li v-for="log in logs" :key="log.id">
