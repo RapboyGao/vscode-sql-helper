@@ -566,20 +566,30 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.rows-toolbar {
+.data-tools {
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--ui-border);
+}
+
+.search-toolbar {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: 16px;
+  gap: 10px;
 }
 
-.rows-toolbar .toolbar {
-  width: min(100%, 360px);
-  margin-top: 0;
+.search-toolbar input {
+  flex: 1 1 auto;
 }
 
-.rows-toolbar .toolbar input,
-.rows-toolbar .toolbar select {
-  width: 100%;
+.rows-meta {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+}
+
+.rows-meta select {
+  width: 140px;
 }
 
 .pagination {

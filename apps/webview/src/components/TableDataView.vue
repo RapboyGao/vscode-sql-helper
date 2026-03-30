@@ -418,15 +418,9 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
 
       <section v-if="activeTab === 'data'" class="surface-stack">
         <div class="card">
-          <div class="rows-toolbar">
-            <div class="toolbar">
+          <div class="data-tools">
+            <div class="search-toolbar">
               <input v-model="keyword" placeholder="Search keyword" @keydown.enter="emitQuery(0)" />
-              <select v-model="pageSize" @change="emitQuery(0)">
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-                <option value="200">200 rows</option>
-              </select>
               <button class="icon-button" title="Run Query" aria-label="Run Query" @click="emitQuery(0)">
                 <MdiIcon :path="mdiMagnify" />
               </button>
@@ -435,18 +429,26 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
 
           <div class="subheader">
             <h2>Rows</h2>
-            <div class="pagination">
-              <button class="secondary icon-button" title="Previous Page" aria-label="Previous Page" :disabled="currentPage <= 1" @click="emitQuery(currentPage - 2)">
-                <MdiIcon :path="mdiChevronLeft" />
-              </button>
-              <label class="page-input">
-                <span>Page</span>
-                <input v-model="pageInput" @keydown.enter="goToPage" />
-              </label>
-              <span class="page-total">/ {{ totalPages }}</span>
-              <button class="secondary icon-button" title="Next Page" aria-label="Next Page" :disabled="currentPage >= totalPages" @click="emitQuery(currentPage)">
-                <MdiIcon :path="mdiChevronRight" />
-              </button>
+            <div class="rows-meta">
+              <select v-model="pageSize" @change="emitQuery(0)">
+                <option value="25">25 rows</option>
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+                <option value="200">200 rows</option>
+              </select>
+              <div class="pagination">
+                <button class="secondary icon-button" title="Previous Page" aria-label="Previous Page" :disabled="currentPage <= 1" @click="emitQuery(currentPage - 2)">
+                  <MdiIcon :path="mdiChevronLeft" />
+                </button>
+                <label class="page-input">
+                  <span>Page</span>
+                  <input v-model="pageInput" @keydown.enter="goToPage" />
+                </label>
+                <span class="page-total">/ {{ totalPages }}</span>
+                <button class="secondary icon-button" title="Next Page" aria-label="Next Page" :disabled="currentPage >= totalPages" @click="emitQuery(currentPage)">
+                  <MdiIcon :path="mdiChevronRight" />
+                </button>
+              </div>
             </div>
           </div>
 
