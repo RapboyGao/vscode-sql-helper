@@ -28,8 +28,14 @@ import type {
 } from "@usd/shared";
 import MdiIcon from "./MdiIcon.vue";
 
-type RowDraftMap = Record<string, Record<string, string>>;
+type RowDraftMap = Record<string, Record<string, unknown>>;
 type DeleteMap = Record<string, boolean>;
+type InputKind = "text" | "number" | "date" | "datetime-local" | "checkbox" | "textarea";
+type TextEditorState = {
+  row: Record<string, unknown>;
+  columnName: string;
+  value: string;
+} | null;
 
 const props = defineProps<{
   connection: SavedConnection;
@@ -63,6 +69,7 @@ const rowDrafts = ref<RowDraftMap>({});
 const pendingDeletes = ref<DeleteMap>({});
 const pendingInserts = ref<PendingTableInsert[]>([]);
 const applyingPending = ref(false);
+const textEditor = ref<TextEditorState>(null);
 
 watch(
   () => props.selectedSchema,
@@ -113,6 +120,7 @@ const totalPages = computed(() => {
 });
 
 const currentPage = computed(() => (props.result?.page ?? props.query.page ?? 0) + 1);
+const pageOffset = computed(() => (props.result?.page ?? props.query.page ?? 0) * (props.result?.pageSize ?? props.query.pageSize ?? 50));
 const visibleColumns = computed(() => props.result?.columns ?? props.structure?.columns ?? []);
 
 const pendingUpdates = computed<PendingTableUpdate[]>(() => {
@@ -204,7 +212,7 @@ function rowKeyPayload(row: Record<string, unknown>): Record<string, unknown> {
   }, {});
 }
 
-function setDraftValue(row: Record<string, unknown>, columnName: string, value: string): void {
+function setDraftValue(row: Record<string, unknown>, columnName: string, value: unknown): void {
   const key = rowKey(row);
   rowDrafts.value = {
     ...rowDrafts.value,
@@ -215,9 +223,9 @@ function setDraftValue(row: Record<string, unknown>, columnName: string, value: 
   };
 }
 
-function draftValue(row: Record<string, unknown>, columnName: string): string {
+function draftValue(row: Record<string, unknown>, columnName: string): unknown {
   const key = rowKey(row);
-  return rowDrafts.value[key]?.[columnName] ?? String(row[columnName] ?? "");
+  return rowDrafts.value[key]?.[columnName] ?? row[columnName] ?? "";
 }
 
 function changeColumnsForRow(row: Record<string, unknown>): Set<string> {
@@ -232,6 +240,135 @@ function changeColumnsForRow(row: Record<string, unknown>): Set<string> {
       .filter(([column, value]) => String(row[column] ?? "") !== value)
       .map(([column]) => column)
   );
+}
+
+function columnSchema(columnName: string) {
+  return visibleColumns.value.find((column) => column.name === columnName);
+}
+
+function columnInputKind(columnName: string): InputKind {
+  const column = columnSchema(columnName);
+  const normalized = column?.dataType.toLowerCase() ?? "";
+
+  if (/(bool|bit)/.test(normalized)) {
+    return "checkbox";
+  }
+
+  if (/(datetime|timestamp)/.test(normalized)) {
+    return "datetime-local";
+  }
+
+  if (/(^date$)/.test(normalized)) {
+    return "date";
+  }
+
+  if (/(int|real|float|double|decimal|numeric)/.test(normalized)) {
+    return "number";
+  }
+
+  if (/(json|text|clob)/.test(normalized)) {
+    return "textarea";
+  }
+
+  return "text";
+}
+
+function isEditableColumn(columnName: string): boolean {
+  const column = columnSchema(columnName);
+  return !column?.autoIncrement;
+}
+
+function normalizeCellValue(columnName: string, value: unknown): string | boolean {
+  const kind = columnInputKind(columnName);
+  if (kind === "checkbox") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    const normalized = String(value ?? "").toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "yes";
+  }
+
+  if (kind === "date") {
+    return formatDateValue(value);
+  }
+
+  if (kind === "datetime-local") {
+    return formatDateTimeValue(value);
+  }
+
+  return String(value ?? "");
+}
+
+function formatDateValue(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  return text.length >= 10 ? text.slice(0, 10) : text;
+}
+
+function formatDateTimeValue(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const normalized = text.replace(" ", "T").replace(/Z$/, "");
+  return normalized.length >= 16 ? normalized.slice(0, 16) : normalized;
+}
+
+function cellDisplayValue(row: Record<string, unknown>, columnName: string): string | boolean {
+  return normalizeCellValue(columnName, draftValue(row, columnName));
+}
+
+function cellChanged(row: Record<string, unknown>, columnName: string): boolean {
+  return normalizeCellValue(columnName, draftValue(row, columnName)) !== normalizeCellValue(columnName, row[columnName]);
+}
+
+function handleCellInput(row: Record<string, unknown>, columnName: string, event: Event): void {
+  const target = event.target as HTMLInputElement | HTMLTextAreaElement;
+  const kind = columnInputKind(columnName);
+
+  if (kind === "checkbox") {
+    setDraftValue(row, columnName, (target as HTMLInputElement).checked);
+    return;
+  }
+
+  if (kind === "number") {
+    const raw = target.value.trim();
+    setDraftValue(row, columnName, raw === "" ? "" : Number(raw));
+    return;
+  }
+
+  setDraftValue(row, columnName, target.value);
+}
+
+function openTextEditor(row: Record<string, unknown>, columnName: string): void {
+  textEditor.value = {
+    row,
+    columnName,
+    value: String(cellDisplayValue(row, columnName))
+  };
+}
+
+function closeTextEditor(): void {
+  textEditor.value = null;
+}
+
+function applyTextEditor(): void {
+  if (!textEditor.value) {
+    return;
+  }
+
+  setDraftValue(textEditor.value.row, textEditor.value.columnName, textEditor.value.value);
+  textEditor.value = null;
+}
+
+function textButtonLabel(row: Record<string, unknown>, columnName: string): string {
+  const value = String(cellDisplayValue(row, columnName)).trim();
+  return value || "Edit text";
 }
 
 function emitQuery(nextPage = 0): void {
@@ -349,6 +486,14 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
     "changed-cell": Object.prototype.hasOwnProperty.call(change.values, column)
   };
 }
+
+function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"): string {
+  if (entryKind === "insert") {
+    return "New";
+  }
+
+  return String(pageOffset.value + (entryIndex - pendingInserts.value.length) + 1);
+}
 </script>
 
 <template>
@@ -428,7 +573,6 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
           </div>
 
           <div class="subheader">
-            <h2>Rows</h2>
             <div class="rows-meta">
               <select v-model="pageSize" @change="emitQuery(0)">
                 <option value="25">25 rows</option>
@@ -440,10 +584,9 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
                 <button class="secondary icon-button" title="Previous Page" aria-label="Previous Page" :disabled="currentPage <= 1" @click="emitQuery(currentPage - 2)">
                   <MdiIcon :path="mdiChevronLeft" />
                 </button>
-                <label class="page-input">
-                  <span>Page</span>
+                <div class="page-input">
                   <input v-model="pageInput" @keydown.enter="goToPage" />
-                </label>
+                </div>
                 <span class="page-total">/ {{ totalPages }}</span>
                 <button class="secondary icon-button" title="Next Page" aria-label="Next Page" :disabled="currentPage >= totalPages" @click="emitQuery(currentPage)">
                   <MdiIcon :path="mdiChevronRight" />
@@ -456,40 +599,75 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
             <table v-if="visibleColumns.length">
               <thead>
                 <tr>
+                  <th class="index-column">#</th>
                   <th v-for="column in visibleColumns" :key="column.name">{{ column.name }}</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 <tr
-                  v-for="entry in rowsForDisplay"
+                  v-for="(entry, entryIndex) in rowsForDisplay"
                   :key="entry.id"
                   :class="{
                     'pending-delete-row': entry.kind === 'existing' && pendingDeletes[entry.id],
                     'pending-insert-row': entry.kind === 'insert'
                   }"
                 >
+                  <td class="index-column">{{ displayRowNumber(entryIndex, entry.kind) }}</td>
                   <td
                     v-for="column in visibleColumns"
                     :key="column.name"
                     :class="{
                       'changed-cell': entry.kind === 'insert'
                         ? String(entry.row[column.name] ?? '') !== ''
-                        : changeColumnsForRow(entry.row).has(column.name),
+                        : cellChanged(entry.row, column.name),
                       'deleted-cell': entry.kind === 'existing' && pendingDeletes[entry.id]
                     }"
                   >
                     <input
-                      :value="entry.kind === 'insert' ? String(entry.row[column.name] ?? '') : draftValue(entry.row, column.name)"
+                      v-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
+                      :type="columnInputKind(column.name)"
+                      :value="String(cellDisplayValue(entry.row, column.name))"
                       :class="{
                         'changed-input': entry.kind === 'insert'
                           ? String(entry.row[column.name] ?? '') !== ''
-                          : changeColumnsForRow(entry.row).has(column.name),
-                        'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id]
+                          : cellChanged(entry.row, column.name),
+                        'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id],
+                        'readonly-input': !isEditableColumn(column.name)
                       }"
-                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id])"
-                      @input="entry.kind === 'existing' && setDraftValue(entry.row, column.name, ($event.target as HTMLInputElement).value)"
+                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
+                      @input="entry.kind === 'existing' && isEditableColumn(column.name) && handleCellInput(entry.row, column.name, $event)"
                     />
+                    <input
+                      v-else-if="columnInputKind(column.name) === 'checkbox'"
+                      type="checkbox"
+                      :checked="Boolean(cellDisplayValue(entry.row, column.name))"
+                      :class="{
+                        'changed-input': entry.kind === 'insert'
+                          ? Boolean(entry.row[column.name])
+                          : cellChanged(entry.row, column.name),
+                        'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id],
+                        'readonly-input': !isEditableColumn(column.name)
+                      }"
+                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
+                      @change="entry.kind === 'existing' && isEditableColumn(column.name) && handleCellInput(entry.row, column.name, $event)"
+                    />
+                    <button
+                      v-else
+                      type="button"
+                      class="text-link-button"
+                      :class="{
+                        'changed-input': entry.kind === 'insert'
+                          ? String(entry.row[column.name] ?? '') !== ''
+                          : cellChanged(entry.row, column.name),
+                        'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id],
+                        'readonly-input': !isEditableColumn(column.name)
+                      }"
+                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
+                      @click="entry.kind === 'existing' && isEditableColumn(column.name) && openTextEditor(entry.row, column.name)"
+                    >
+                      {{ textButtonLabel(entry.row, column.name) }}
+                    </button>
                   </td>
                   <td class="row-actions">
                     <button class="danger icon-button" title="Delete" aria-label="Delete" @click="entry.kind === 'insert'
@@ -659,6 +837,19 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
         </ul>
         <p v-else class="empty-state">No operations yet.</p>
       </section>
+
+      <div v-if="textEditor" class="modal-backdrop" @click.self="closeTextEditor">
+        <div class="modal-card">
+          <div class="subheader">
+            <h2>{{ textEditor.columnName }}</h2>
+            <div class="actions">
+              <button class="secondary" type="button" @click="closeTextEditor">Cancel</button>
+              <button type="button" @click="applyTextEditor">Apply</button>
+            </div>
+          </div>
+          <textarea v-model="textEditor.value" rows="12" class="modal-textarea" />
+        </div>
+      </div>
     </section>
   </section>
 </template>

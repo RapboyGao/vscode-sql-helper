@@ -95,7 +95,8 @@ button.danger:hover {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--ui-input-border);
   border-radius: 8px;
@@ -104,8 +105,17 @@ select {
   color: var(--ui-input-fg);
 }
 
+textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
 input::placeholder {
   color: var(--ui-muted);
+}
+
+input[type="checkbox"] {
+  width: auto;
 }
 
 label span,
@@ -441,9 +451,9 @@ button:disabled {
 }
 
 .data-grid {
+  padding: 0;
   overflow: auto;
   border: 1px solid var(--ui-border);
-  border-radius: 12px;
   background: var(--ui-surface);
 }
 
@@ -586,6 +596,8 @@ button:disabled {
   display: flex;
   align-items: end;
   gap: 14px;
+  width: 100%;
+  justify-content: space-between;
 }
 
 .rows-meta select {
@@ -600,8 +612,6 @@ button:disabled {
 
 .page-input {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
 }
 
 .page-input input {
@@ -613,6 +623,10 @@ button:disabled {
   padding-bottom: 10px;
 }
 
+.data-grid {
+  margin-top: 14px;
+}
+
 .changed-cell {
   background: color-mix(in srgb, var(--ui-selection) 28%, transparent);
 }
@@ -621,6 +635,34 @@ button:disabled {
   border-color: color-mix(in srgb, var(--ui-success) 80%, var(--ui-input-border));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-success) 55%, transparent);
   background: color-mix(in srgb, var(--ui-success) 12%, var(--ui-input-bg));
+}
+
+.readonly-input {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.text-link-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-link);
+  text-align: left;
+  text-decoration: underline;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.text-link-button:hover {
+  background: transparent;
+  color: var(--ui-selection-fg, var(--ui-link));
+}
+
+.text-link-button.readonly-input {
+  text-decoration: none;
 }
 
 .deleted-input {
@@ -644,6 +686,40 @@ button:disabled {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.index-column {
+  width: 72px;
+  min-width: 72px;
+  color: var(--ui-muted);
+  white-space: nowrap;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--ui-bg) 60%, transparent);
+  z-index: 10;
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  max-height: min(80vh, 720px);
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  background: var(--ui-surface-alt);
+  box-shadow: 0 12px 32px color-mix(in srgb, black 18%, transparent);
+}
+
+.modal-textarea {
+  min-height: 280px;
 }
 
 body.vscode-high-contrast .panel-shell,
