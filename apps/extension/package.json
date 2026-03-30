@@ -1,0 +1,142 @@
+{
+  "name": "universal-sql-database-manager",
+  "displayName": "Universal SQL Database Manager",
+  "description": "Manage MySQL, PostgreSQL, and SQLite databases from the VS Code sidebar.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "private": true,
+  "license": "GPL-2.0-only",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onView:databaseManager.savedConnections",
+    "onCommand:extension.addConnection",
+    "onCommand:extension.openSQLiteFile",
+    "onCustomEditor:databaseManager.sqliteEditor"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "resources/database-manager.svg",
+  "contributes": {
+    "commands": [
+      { "command": "extension.addConnection", "title": "Database Manager: Add Connection" },
+      { "command": "extension.editConnection", "title": "Database Manager: Edit Connection" },
+      { "command": "extension.removeConnection", "title": "Database Manager: Remove Connection" },
+      { "command": "extension.testConnection", "title": "Database Manager: Test Connection" },
+      { "command": "extension.refreshExplorer", "title": "Database Manager: Refresh Explorer" },
+      { "command": "extension.openConnectionDetails", "title": "Database Manager: Open Connection Details" },
+      { "command": "extension.openTableData", "title": "Database Manager: Open Table Data" },
+      { "command": "extension.insertRow", "title": "Database Manager: Insert Row" },
+      { "command": "extension.updateRow", "title": "Database Manager: Update Row" },
+      { "command": "extension.deleteRow", "title": "Database Manager: Delete Row" },
+      { "command": "extension.createTable", "title": "Database Manager: Create Table" },
+      { "command": "extension.deleteTable", "title": "Database Manager: Delete Table" },
+      { "command": "extension.renameTable", "title": "Database Manager: Rename Table" },
+      { "command": "extension.addColumn", "title": "Database Manager: Add Column" },
+      { "command": "extension.editColumn", "title": "Database Manager: Edit Column" },
+      { "command": "extension.deleteColumn", "title": "Database Manager: Delete Column" },
+      { "command": "extension.renameColumn", "title": "Database Manager: Rename Column" },
+      { "command": "extension.openSQLiteFile", "title": "Database Manager: Open SQLite File" },
+      { "command": "extension.addSQLiteFileAsConnection", "title": "Database Manager: Add SQLite File As Connection" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "databaseManager",
+          "title": "Database Manager",
+          "icon": "resources/database-manager.svg"
+        }
+      ]
+    },
+    "views": {
+      "databaseManager": [
+        {
+          "id": "databaseManager.savedConnections",
+          "name": "Saved Connections"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "databaseManager.sqliteEditor",
+        "displayName": "Database Manager",
+        "selector": [
+          { "filenamePattern": "*.sqlite" },
+          { "filenamePattern": "*.sqlite3" },
+          { "filenamePattern": "*.db" },
+          { "filenamePattern": "*.db3" }
+        ],
+        "priority": "default"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "extension.addConnection",
+          "when": "view == databaseManager.savedConnections",
+          "group": "navigation"
+        },
+        {
+          "command": "extension.openSQLiteFile",
+          "when": "view == databaseManager.savedConnections",
+          "group": "navigation@1"
+        },
+        {
+          "command": "extension.refreshExplorer",
+          "when": "view == databaseManager.savedConnections",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "extension.openConnectionDetails",
+          "when": "view == databaseManager.savedConnections && viewItem == connection",
+          "group": "inline"
+        },
+        {
+          "command": "extension.editConnection",
+          "when": "view == databaseManager.savedConnections && viewItem == connection",
+          "group": "navigation"
+        },
+        {
+          "command": "extension.removeConnection",
+          "when": "view == databaseManager.savedConnections && viewItem == connection",
+          "group": "modification"
+        },
+        {
+          "command": "extension.openTableData",
+          "when": "view == databaseManager.savedConnections && viewItem == table",
+          "group": "inline"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "extension.addSQLiteFileAsConnection",
+          "when": "resourceExtname == .sqlite || resourceExtname == .sqlite3 || resourceExtname == .db || resourceExtname == .db3",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "watch": "node ./scripts/build.mjs --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm typecheck",
+    "package:vsix": "npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "@usd/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.8.3"
+  }
+}

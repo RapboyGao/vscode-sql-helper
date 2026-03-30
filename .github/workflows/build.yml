@@ -1,0 +1,96 @@
+name: Build Extension And Native Binaries
+
+on:
+  push:
+    branches: ["main", "master"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  native:
+    name: Native ${{ matrix.platform_key }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            rust_target: x86_64-apple-darwin
+            platform_key: darwin-x64
+            binary_name: usd-native
+          - os: macos-latest
+            rust_target: aarch64-apple-darwin
+            platform_key: darwin-arm64
+            binary_name: usd-native
+          - os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            platform_key: linux-x64
+            binary_name: usd-native
+          - os: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            platform_key: linux-arm64
+            binary_name: usd-native
+          - os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            platform_key: win32-x64
+            binary_name: usd-native.exe
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+      - name: Build native binary
+        run: cargo build --manifest-path native/rust-backend/Cargo.toml --release --target ${{ matrix.rust_target }}
+      - name: Copy platform binary
+        shell: bash
+        run: |
+          node scripts/copy-native-binary.mjs
+        env:
+          PLATFORM_KEY: ${{ matrix.platform_key }}
+          BINARY_NAME: ${{ matrix.binary_name }}
+          SOURCE_BINARY: native/rust-backend/target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform_key }}
+          path: apps/extension/bin/${{ matrix.platform_key }}/${{ matrix.binary_name }}
+
+  extension:
+    name: Package Extension
+    runs-on: ubuntu-latest
+    needs: native
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          merge-multiple: false
+          path: /tmp/native-artifacts
+      - name: Assemble packaged binaries
+        shell: bash
+        run: |
+          mkdir -p apps/extension/bin
+          find /tmp/native-artifacts -type f | while read file; do
+            platform="$(basename "$(dirname "$file")")"
+            mkdir -p "apps/extension/bin/$platform"
+            cp "$file" "apps/extension/bin/$platform/"
+          done
+      - name: Build workspace
+        run: pnpm build
+      - name: Package VSIX
+        run: pnpm package:vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-package
+          path: apps/extension/*.vsix
+

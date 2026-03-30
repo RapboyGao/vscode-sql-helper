@@ -1,0 +1,23 @@
+{
+  "name": "universal-sql-database-manager",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:shared": "pnpm --filter @usd/shared build",
+    "build:webview": "pnpm --filter @usd/webview build",
+    "build:extension": "pnpm --filter universal-sql-database-manager build",
+    "build:native": "cargo build --manifest-path native/rust-backend/Cargo.toml --release",
+    "dev:webview": "pnpm --filter @usd/webview dev",
+    "watch:extension": "pnpm --filter universal-sql-database-manager watch",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "package:vsix": "pnpm --filter universal-sql-database-manager package:vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}
+

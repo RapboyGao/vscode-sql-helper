@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--vscode-font-family);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--vscode-button-border, transparent);
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  border-color: var(--vscode-panel-border);
+}
+
+button.danger {
+  background: transparent;
+  color: var(--vscode-errorForeground);
+  border-color: color-mix(in srgb, var(--vscode-errorForeground) 35%, transparent);
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--vscode-input-background);
+  color: var(--vscode-input-foreground);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding: 10px;
+  text-align: left;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.app-shell {
+  padding: 20px;
+}
+
+.panel-shell,
+.card {
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--vscode-editor-background) 92%, var(--vscode-textLink-foreground) 8%);
+}
+
+.panel-shell {
+  padding: 20px;
+}
+
+.panel-header,
+.subheader,
+.toolbar,
+.actions,
+.tabs,
+.surface-stack {
+  display: flex;
+  gap: 12px;
+}
+
+.panel-header,
+.subheader {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.panel-header {
+  margin-bottom: 20px;
+}
+
+.toolbar,
+.tabs,
+.surface-stack,
+.grid {
+  margin-top: 16px;
+}
+
+.grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.grid label,
+.checkbox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkbox {
+  flex-direction: row;
+  align-items: center;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.tabs button.active {
+  outline: 2px solid var(--vscode-focusBorder);
+}
+
+.surface-stack {
+  flex-direction: column;
+}
+
+.data-grid,
+.preview-card,
+.log-card,
+.card {
+  padding: 16px;
+}
+
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.log-list li {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr auto;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--vscode-textLink-foreground) 15%, transparent);
+}
+
+.banner.error {
+  background: color-mix(in srgb, var(--vscode-errorForeground) 15%, transparent);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  margin: 0 0 6px;
+}
+
+.empty-state {
+  color: var(--vscode-descriptionForeground);
+}
+
+.ok {
+  color: var(--vscode-testing-iconPassed);
+}
+
+.bad {
+  color: var(--vscode-errorForeground);
+}
