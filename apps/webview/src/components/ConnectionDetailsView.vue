@@ -35,6 +35,16 @@ const emit = defineEmits<{
         <div class="connection-meta">
           <span class="status-chip" :class="{ busy: busyAction, readonly: form.readonly }">{{ statusText }}</span>
           <span class="meta-pill">{{ form.type.toUpperCase() }}</span>
+          <button
+            class="danger action-button meta-action"
+            :disabled="busyAction !== null"
+            title="Delete Connection"
+            aria-label="Delete Connection"
+            @click="emit('remove', connection.id)"
+          >
+            <MdiIcon :path="mdiDeleteOutline" />
+            <span>Delete</span>
+          </button>
         </div>
       </div>
       <div class="actions">
@@ -57,16 +67,6 @@ const emit = defineEmits<{
         >
           <MdiIcon :path="mdiContentSave" />
           <span>{{ busyAction === "save" ? "Saving..." : "Save" }}</span>
-        </button>
-        <button
-          class="danger action-button"
-          :disabled="busyAction !== null"
-          title="Delete Connection"
-          aria-label="Delete Connection"
-          @click="emit('remove', connection.id)"
-        >
-          <MdiIcon :path="mdiDeleteOutline" />
-          <span>Delete</span>
         </button>
       </div>
     </header>

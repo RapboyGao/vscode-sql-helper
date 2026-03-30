@@ -33,7 +33,8 @@ type RowDraftMap = Record<string, Record<string, unknown>>;
 type DeleteMap = Record<string, boolean>;
 type InputKind = "text" | "number" | "date" | "datetime-local" | "checkbox" | "textarea";
 type TextEditorState = {
-  row: Record<string, unknown>;
+  source: "existing" | "insert";
+  row?: Record<string, unknown>;
   columnName: string;
   value: string;
 } | null;
@@ -402,6 +403,7 @@ function setInsertDraftValue(columnName: string, value: string): void {
 
 function openTextEditor(row: Record<string, unknown>, columnName: string): void {
   textEditor.value = {
+    source: "existing",
     row,
     columnName,
     value: String(cellDisplayValue(row, columnName))
@@ -417,7 +419,11 @@ function applyTextEditor(): void {
     return;
   }
 
-  setDraftValue(textEditor.value.row, textEditor.value.columnName, textEditor.value.value);
+  if (textEditor.value.source === "insert") {
+    setInsertDraftValue(textEditor.value.columnName, textEditor.value.value);
+  } else if (textEditor.value.row) {
+    setDraftValue(textEditor.value.row, textEditor.value.columnName, textEditor.value.value);
+  }
   textEditor.value = null;
 }
 
@@ -428,7 +434,7 @@ function textButtonLabel(row: Record<string, unknown>, columnName: string): stri
 
 function openInsertTextEditor(columnName: string): void {
   textEditor.value = {
-    row: insertDraft.value,
+    source: "insert",
     columnName,
     value: String(insertDraft.value[columnName] ?? "")
   };
@@ -534,10 +540,32 @@ function applyAllPending(): void {
   }
 
   applyingPending.value = true;
+  const changes = pendingChanges.value.map((change) =>
+    change.kind === "insert"
+      ? {
+          kind: "insert" as const,
+          tempId: change.tempId,
+          row: { ...change.row }
+        }
+      : change.kind === "update"
+        ? {
+            kind: "update" as const,
+            rowKey: change.rowKey,
+            key: { ...change.key },
+            originalRow: { ...change.originalRow },
+            values: { ...change.values }
+          }
+        : {
+            kind: "delete" as const,
+            rowKey: change.rowKey,
+            key: { ...change.key },
+            row: { ...change.row }
+          }
+  );
   emit("applyChanges", {
     schema: selectedSchema.value || undefined,
     table: selectedTable.value,
-    changes: pendingChanges.value
+    changes
   });
 }
 
@@ -716,7 +744,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       :model-value="String(cellDisplayValue(entry.row, column.name))"
                       :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
                       placeholder="Set datetime"
-                      @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
+                      @update:model-value="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
                     />
                     <input
                       v-else-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
@@ -787,7 +815,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               <button class="secondary icon-button" title="Restore All" aria-label="Restore All" @click="clearAllPending">
                 <MdiIcon :path="mdiRestore" />
               </button>
-              <button class="icon-button" title="Apply All" aria-label="Apply All" :disabled="!pendingChanges.length" @click="applyAllPending">
+              <button
+                class="icon-button"
+                :title="applyingPending ? 'Applying Changes' : 'Apply All'"
+                :aria-label="applyingPending ? 'Applying Changes' : 'Apply All'"
+                :disabled="!pendingChanges.length || applyingPending"
+                @click="applyAllPending"
+              >
                 <MdiIcon :path="mdiPlayCircleOutline" />
               </button>
             </div>
@@ -848,43 +882,65 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               <MdiIcon :path="mdiPlusCircleOutline" />
             </button>
           </div>
-          <div class="grid">
-            <label v-for="column in visibleColumns" :key="column.name">
-              <span>{{ column.name }}</span>
-              <input
-                v-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox' && columnInputKind(column.name) !== 'datetime-local'"
-                :type="columnInputKind(column.name)"
-                :value="String(insertDraft[column.name] ?? '')"
-                :disabled="!isEditableColumn(column.name)"
-                :class="{ 'readonly-input': !isEditableColumn(column.name), 'identity-input': isWideIdentityColumn(column.name) }"
-                @input="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
-              />
+          <div class="data-grid">
+            <table v-if="visibleColumns.length">
+              <thead>
+                <tr>
+                  <th class="index-column">#</th>
+                  <th
+                    v-for="column in visibleColumns"
+                    :key="column.name"
+                    :class="{ 'identity-cell': isWideIdentityColumn(column.name) }"
+                  >
+                    {{ column.name }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="index-column">New</td>
+                  <td
+                    v-for="column in visibleColumns"
+                    :key="column.name"
+                    :class="{ 'identity-cell': isWideIdentityColumn(column.name) }"
+                  >
+                    <input
+                      v-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox' && columnInputKind(column.name) !== 'datetime-local'"
+                      :type="columnInputKind(column.name)"
+                      :value="String(insertDraft[column.name] ?? '')"
+                      :disabled="!isEditableColumn(column.name)"
+                      :class="{ 'readonly-input': !isEditableColumn(column.name), 'identity-input': isWideIdentityColumn(column.name) }"
+                      @input="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
+                    />
               <DateTimeEditor
                 v-else-if="columnInputKind(column.name) === 'datetime-local'"
                 :model-value="String(insertDraft[column.name] ?? '')"
                 :disabled="!isEditableColumn(column.name)"
                 placeholder="Set datetime"
-                @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
+                @update:model-value="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
               />
-              <input
-                v-else-if="columnInputKind(column.name) === 'checkbox'"
-                type="checkbox"
-                :checked="Boolean(insertDraft[column.name])"
-                :disabled="!isEditableColumn(column.name)"
-                :class="{ 'readonly-input': !isEditableColumn(column.name) }"
-                @change="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
-              />
-              <button
-                v-else
-                type="button"
-                class="text-link-button"
-                :disabled="!isEditableColumn(column.name)"
-                :class="{ 'readonly-input': !isEditableColumn(column.name) }"
-                @click="isEditableColumn(column.name) && openInsertTextEditor(column.name)"
-              >
-                {{ String(insertDraft[column.name] ?? '').trim() || "Edit text" }}
-              </button>
-            </label>
+                    <input
+                      v-else-if="columnInputKind(column.name) === 'checkbox'"
+                      type="checkbox"
+                      :checked="Boolean(insertDraft[column.name])"
+                      :disabled="!isEditableColumn(column.name)"
+                      :class="{ 'readonly-input': !isEditableColumn(column.name) }"
+                      @change="isEditableColumn(column.name) && handleInsertDraftInput(column.name, $event)"
+                    />
+                    <button
+                      v-else
+                      type="button"
+                      class="text-link-button"
+                      :disabled="!isEditableColumn(column.name)"
+                      :class="{ 'readonly-input': !isEditableColumn(column.name) }"
+                      @click="isEditableColumn(column.name) && openInsertTextEditor(column.name)"
+                    >
+                      {{ String(insertDraft[column.name] ?? '').trim() || "Edit text" }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>

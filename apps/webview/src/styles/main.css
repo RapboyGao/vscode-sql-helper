@@ -280,6 +280,12 @@ pre {
   font-size: 12px;
 }
 
+.meta-action {
+  min-height: 30px;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
 .status-chip.busy {
   border-color: color-mix(in srgb, var(--ui-link) 35%, var(--ui-border));
   background: color-mix(in srgb, var(--ui-link) 14%, var(--ui-surface));
