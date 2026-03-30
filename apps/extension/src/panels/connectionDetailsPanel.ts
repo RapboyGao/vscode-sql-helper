@@ -75,39 +75,91 @@ export class ConnectionDetailsPanel {
       return;
     }
 
-    if (message.type === "connection/save") {
-      const connection = await this.connectionStore.upsert(message.payload);
-      await this.logStore.append({
-        connectionName: connection.name,
-        objectName: connection.name,
-        operation: "saveConnection",
-        success: true
-      });
-      this.refreshExplorer();
-      await this.postBootstrap(connection.id);
-      return;
-    }
+    try {
+      if (message.type === "connection/save") {
+        const savedConnection = await this.connectionStore.upsert(message.payload);
+        const connection = this.connectionStore.get(savedConnection.id);
+        if (!connection) {
+          throw new Error("Connection save could not be verified");
+        }
 
-    if (message.type === "connection/test") {
-      const tempConnection = await this.connectionStore.upsert({
-        ...message.payload,
-        id: message.payload.id ?? undefined
-      });
-      const response = await this.nativeBridge.call(tempConnection, "testConnection", {});
+        const form = await this.connectionStore.toForm(connection.id);
+        if (form.readonly !== message.payload.readonly) {
+          throw new Error("Connection save did not persist the latest readonly setting");
+        }
+
+        this.currentConnectionId = connection.id;
+        this.panel.title = `Connection: ${connection.name}`;
+        await this.panel.webview.postMessage({
+          type: "connection/saved",
+          payload: {
+            connection,
+            form
+          }
+        } satisfies ExtensionToWebviewMessage);
+        void this.logStore.append({
+          connectionName: connection.name,
+          objectName: connection.name,
+          operation: "saveConnection",
+          success: true
+        });
+        this.refreshExplorer();
+        return;
+      }
+
+      if (message.type === "connection/test") {
+        const response = await this.nativeBridge.callWithInput(
+          this.connectionStore.toNativeConnectionFromForm(message.payload),
+          message.payload.readonly,
+          "testConnection",
+          {}
+        );
+        await this.panel.webview.postMessage({
+          type: "connection/testResult",
+          payload: {
+            success: response.success,
+            message: response.success ? "Connection successful" : response.error?.message ?? "Connection failed"
+          }
+        } satisfies ExtensionToWebviewMessage);
+        return;
+      }
+
+      if (message.type === "connection/pickFile") {
+        const result = await vscode.window.showOpenDialog({
+          canSelectFiles: true,
+          canSelectMany: false,
+          filters: message.payload.filters ?? {
+            SQLite: ["sqlite", "sqlite3", "db", "db3"],
+            All: ["*"]
+          }
+        });
+        const fileUri = result?.[0];
+        if (!fileUri) {
+          return;
+        }
+
+        await this.panel.webview.postMessage({
+          type: "connection/filePicked",
+          payload: {
+            filePath: fileUri.fsPath
+          }
+        } satisfies ExtensionToWebviewMessage);
+        return;
+      }
+
+      if (message.type === "connection/delete") {
+        await this.connectionStore.delete(message.payload.connectionId);
+        this.refreshExplorer();
+        this.panel.dispose();
+      }
+    } catch (error) {
       await this.panel.webview.postMessage({
-        type: "connection/testResult",
+        type: "ui/error",
         payload: {
-          success: response.success,
-          message: response.success ? "Connection successful" : response.error?.message ?? "Connection failed"
+          code: "UNKNOWN",
+          message: error instanceof Error ? error.message : "Connection operation failed"
         }
       } satisfies ExtensionToWebviewMessage);
-      return;
-    }
-
-    if (message.type === "connection/delete") {
-      await this.connectionStore.delete(message.payload.connectionId);
-      this.refreshExplorer();
-      this.panel.dispose();
     }
   }
 

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { ConnectionFormState, SavedConnection, ServerConnection } from "@usd/shared";
+import type { ConnectionFormState, NativeConnectionInput, SavedConnection, ServerConnection } from "@usd/shared";
 import { createEmptyConnectionForm, toConnectionForm } from "@usd/shared";
 import { createId } from "../utils/id.js";
 
@@ -126,5 +126,31 @@ export class ConnectionStore {
       ssl: connection.ssl
     };
   }
-}
 
+  public toNativeConnectionFromForm(form: ConnectionFormState): NativeConnectionInput {
+    if (form.kind === "file") {
+      return {
+        kind: "file",
+        type: "sqlite",
+        filePath: form.filePath
+      };
+    }
+
+    return {
+      kind: "server",
+      type: form.type,
+      host: form.host,
+      port: form.port,
+      username: form.username,
+      password: form.password,
+      database: form.database || undefined,
+      schema: form.schema || undefined,
+      ssl: form.sslEnabled
+        ? {
+            enabled: true,
+            rejectUnauthorized: form.sslRejectUnauthorized
+          }
+        : undefined
+    };
+  }
+}

@@ -31,14 +31,74 @@ const sqlPreview = ref<{ title: string; statements: string[] } | null>(null);
 const message = ref<string>("");
 const isError = ref(false);
 const applySignal = ref(0);
+const connectionBusyAction = ref<"save" | "test" | null>(null);
+const connectionStatusText = ref("Ready");
+let connectionBusyTimer: number | undefined;
 
 function post(payload: WebviewToExtensionMessage): void {
   vscode?.postMessage(payload);
 }
 
+function toPlainConnectionForm(value: ConnectionFormState): ConnectionFormState {
+  return {
+    ...value
+  };
+}
+
 function showNotice(text: string, error = false): void {
   message.value = text;
   isError.value = error;
+}
+
+function clearConnectionBusy(): void {
+  connectionBusyAction.value = null;
+  if (connectionBusyTimer !== undefined) {
+    window.clearTimeout(connectionBusyTimer);
+    connectionBusyTimer = undefined;
+  }
+}
+
+function startConnectionBusy(action: "save" | "test", statusText: string): void {
+  clearConnectionBusy();
+  connectionBusyAction.value = action;
+  connectionStatusText.value = statusText;
+  connectionBusyTimer = window.setTimeout(() => {
+    if (connectionBusyAction.value !== action) {
+      return;
+    }
+
+    clearConnectionBusy();
+    connectionStatusText.value = "No response";
+    showNotice(`Connection ${action} did not finish. Please try again.`, true);
+  }, 8000);
+}
+
+function requestConnectionSave(nextForm: ConnectionFormState): void {
+  startConnectionBusy("save", "Saving connection...");
+  post({
+    type: "connection/save",
+    payload: toPlainConnectionForm(nextForm)
+  });
+}
+
+function requestConnectionTest(nextForm: ConnectionFormState): void {
+  startConnectionBusy("test", "Testing connection...");
+  post({
+    type: "connection/test",
+    payload: toPlainConnectionForm(nextForm)
+  });
+}
+
+function requestConnectionFilePick(): void {
+  post({
+    type: "connection/pickFile",
+    payload: {
+      filters: {
+        SQLite: ["sqlite", "sqlite3", "db", "db3"],
+        All: ["*"]
+      }
+    }
+  });
 }
 
 onMounted(() => {
@@ -50,14 +110,29 @@ onMounted(() => {
         connection.value = next.payload.connection;
         form.value = next.payload.form;
         logs.value = next.payload.logs;
+        clearConnectionBusy();
+        connectionStatusText.value = next.payload.connection.readonly ? "Readonly" : "Read / Write";
         break;
       case "connection/saved":
         connection.value = next.payload.connection;
         form.value = next.payload.form;
+        clearConnectionBusy();
+        connectionStatusText.value = next.payload.connection.readonly ? "Readonly" : "Read / Write";
         showNotice("Connection saved");
         break;
       case "connection/testResult":
+        clearConnectionBusy();
+        connectionStatusText.value = next.payload.success ? "Connection verified" : "Connection failed";
         showNotice(next.payload.message, !next.payload.success);
+        break;
+      case "connection/filePicked":
+        if (form.value) {
+          form.value = {
+            ...form.value,
+            filePath: next.payload.filePath
+          };
+        }
+        connectionStatusText.value = "File selected";
         break;
       case "tableData/bootstrap":
         mode.value = "tableData";
@@ -89,6 +164,7 @@ onMounted(() => {
         logs.value = next.payload.logs;
         break;
       case "ui/error":
+        clearConnectionBusy();
         showNotice(next.payload.message, true);
         break;
     }
@@ -107,9 +183,12 @@ onMounted(() => {
       :connection="connection"
       :form="form"
       :logs="logs"
+      :busy-action="connectionBusyAction"
+      :status-text="connectionStatusText"
       @update="form = $event"
-      @save="post({ type: 'connection/save', payload: $event })"
-      @test="post({ type: 'connection/test', payload: $event })"
+      @save="requestConnectionSave($event)"
+      @test="requestConnectionTest($event)"
+      @pick-file="requestConnectionFilePick()"
       @remove="post({ type: 'connection/delete', payload: { connectionId: $event } })"
     />
 

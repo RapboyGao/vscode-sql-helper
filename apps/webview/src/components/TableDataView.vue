@@ -397,18 +397,6 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
               <span>{{ selectedTable || "Choose a table" }}</span>
             </h1>
           </div>
-          <div class="toolbar">
-            <input v-model="keyword" placeholder="Search keyword" @keydown.enter="emitQuery(0)" />
-            <select v-model="pageSize" @change="emitQuery(0)">
-              <option value="25">25 rows</option>
-              <option value="50">50 rows</option>
-              <option value="100">100 rows</option>
-              <option value="200">200 rows</option>
-            </select>
-            <button class="icon-button" title="Run Query" aria-label="Run Query" @click="emitQuery(0)">
-              <MdiIcon :path="mdiMagnify" />
-            </button>
-          </div>
         </div>
 
         <nav class="tabs">
@@ -430,6 +418,21 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
 
       <section v-if="activeTab === 'data'" class="surface-stack">
         <div class="card">
+          <div class="rows-toolbar">
+            <div class="toolbar">
+              <input v-model="keyword" placeholder="Search keyword" @keydown.enter="emitQuery(0)" />
+              <select v-model="pageSize" @change="emitQuery(0)">
+                <option value="25">25 rows</option>
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+                <option value="200">200 rows</option>
+              </select>
+              <button class="icon-button" title="Run Query" aria-label="Run Query" @click="emitQuery(0)">
+                <MdiIcon :path="mdiMagnify" />
+              </button>
+            </div>
+          </div>
+
           <div class="subheader">
             <h2>Rows</h2>
             <div class="pagination">

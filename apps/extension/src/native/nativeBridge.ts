@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
-import type { NativeRequest, NativeResponse, SavedConnection } from "@usd/shared";
+import type { NativeConnectionInput, NativeRequest, NativeResponse, SavedConnection } from "@usd/shared";
 import { createId } from "../utils/id.js";
 import { ensureReadonlyAllowed } from "../utils/errors.js";
 import { ConnectionStore } from "../storage/connectionStore.js";
@@ -33,6 +33,37 @@ export class NativeBridge {
       readonly: connection.readonly,
       payload
     };
+
+    return this.executeRequest(request);
+  }
+
+  public async callWithInput<TPayload, TData>(
+    connection: NativeConnectionInput,
+    readonly: boolean,
+    operation: NativeRequest<TPayload>["operation"],
+    payload?: TPayload
+  ): Promise<NativeResponse<TData>> {
+    const readonlyError = ensureReadonlyAllowed(readonly, operation);
+    if (readonlyError) {
+      return {
+        requestId: createId("request"),
+        success: false,
+        error: readonlyError
+      };
+    }
+
+    const request: NativeRequest<TPayload> = {
+      requestId: createId("request"),
+      operation,
+      connection,
+      readonly,
+      payload
+    };
+
+    return this.executeRequest(request);
+  }
+
+  private async executeRequest<TData>(request: NativeRequest<unknown>): Promise<NativeResponse<TData>> {
 
     const executable = resolveNativeBinaryPath(this.context.extensionUri);
 
@@ -67,4 +98,3 @@ export class NativeBridge {
     });
   }
 }
-

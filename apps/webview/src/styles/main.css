@@ -151,6 +151,11 @@ pre {
   padding: 20px;
 }
 
+.connection-layout {
+  display: grid;
+  gap: 20px;
+}
+
 .db-layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
@@ -214,6 +219,94 @@ pre {
 
 .panel-shell {
   padding: 20px;
+}
+
+.connection-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.connection-hero-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.connection-subtitle {
+  margin: 0;
+  color: var(--ui-muted);
+}
+
+.connection-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.status-chip,
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: var(--ui-fg);
+  font-size: 12px;
+}
+
+.status-chip.busy {
+  border-color: color-mix(in srgb, var(--ui-link) 35%, var(--ui-border));
+  background: color-mix(in srgb, var(--ui-link) 14%, var(--ui-surface));
+}
+
+.status-chip.readonly {
+  border-color: color-mix(in srgb, var(--ui-danger) 25%, var(--ui-border));
+}
+
+.connection-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr);
+  gap: 20px;
+}
+
+.connection-side {
+  display: grid;
+  gap: 20px;
+  align-self: start;
+}
+
+.form-card,
+.connection-options {
+  padding: 18px;
+}
+
+.connection-form-grid {
+  margin-top: 0;
+}
+
+.option-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  background: var(--ui-surface);
+}
+
+.option-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.file-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
 }
 
 .panel-header,
@@ -326,6 +419,18 @@ pre {
   min-width: 40px;
   min-height: 40px;
   padding: 8px;
+}
+
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .data-grid,
@@ -461,6 +566,22 @@ pre {
   flex-wrap: wrap;
 }
 
+.rows-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.rows-toolbar .toolbar {
+  width: min(100%, 360px);
+  margin-top: 0;
+}
+
+.rows-toolbar .toolbar input,
+.rows-toolbar .toolbar select {
+  width: 100%;
+}
+
 .pagination {
   display: flex;
   align-items: end;
@@ -530,6 +651,11 @@ body.vscode-high-contrast select {
 }
 
 @media (max-width: 1024px) {
+  .connection-hero,
+  .connection-grid {
+    grid-template-columns: 1fr;
+  }
+
   .db-layout {
     grid-template-columns: 1fr;
   }

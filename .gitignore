@@ -4,10 +4,11 @@ dist/
 coverage/
 .DS_Store
 *.vsix
+*.tsbuildinfo
 bin/
 target/
 apps/webview/dist/
 apps/extension/dist/
+apps/extension/media/webview/
 native/rust-backend/target/
 native/rust-backend/Cargo.lock
-

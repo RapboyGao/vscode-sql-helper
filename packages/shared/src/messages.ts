@@ -39,6 +39,12 @@ export type ExtensionToWebviewMessage =
       };
     }
   | {
+      type: "connection/filePicked";
+      payload: {
+        filePath: string;
+      };
+    }
+  | {
       type: "tableData/bootstrap";
       payload: {
         connection: SavedConnection;
@@ -99,6 +105,12 @@ export type WebviewToExtensionMessage =
   | {
       type: "connection/delete";
       payload: { connectionId: string };
+    }
+  | {
+      type: "connection/pickFile";
+      payload: {
+        filters?: Record<string, string[]>;
+      };
     }
   | {
       type: "tableData/query";
