@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Result};
 use serde_json::{json, Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool};
-use tokio::fs;
+use tokio::{
+    fs::{self, File},
+    io::AsyncReadExt,
+};
 
 use crate::models::NativeConnectionInput;
 
@@ -11,16 +14,22 @@ pub async fn validate_file(connection: &NativeConnectionInput) -> Result<Value> 
     if !metadata.is_file() {
         return Err(anyhow!("SQLite path is not a file"));
     }
-    let bytes = fs::read(file_path).await?;
-    if bytes.len() < 16 || &bytes[0..16] != b"SQLite format 3\0" {
+    if metadata.len() < 16 {
+        return Err(anyhow!("SQLite file is invalid or locked"));
+    }
+    let mut file = File::open(file_path).await?;
+    let mut header = [0_u8; 16];
+    file.read_exact(&mut header).await?;
+    if &header != b"SQLite format 3\0" {
         return Err(anyhow!("SQLite file is invalid or locked"));
     }
     Ok(json!({ "valid": true }))
 }
 
-pub async fn connect(connection: &NativeConnectionInput) -> Result<SqlitePool> {
+pub async fn connect(connection: &NativeConnectionInput, readonly: bool) -> Result<SqlitePool> {
     let file_path = connection.file_path.as_ref().ok_or_else(|| anyhow!("SQLite file path is required"))?;
-    let uri = format!("sqlite:{}?mode=rwc", file_path);
+    let mode = if readonly { "ro" } else { "rw" };
+    let uri = format!("sqlite:{}?mode={mode}", file_path);
     SqlitePool::connect(&uri).await.map_err(Into::into)
 }
 

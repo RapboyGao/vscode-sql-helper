@@ -20,7 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerTreeDataProvider("databaseManager.savedConnections", explorer),
     vscode.window.registerCustomEditorProvider(
       SqliteCustomEditorProvider.viewType,
-      new SqliteCustomEditorProvider(connectionStore, explorer, tablePanel, nativeBridge),
+      new SqliteCustomEditorProvider(context, connectionStore, explorer, tablePanel, nativeBridge),
       {
         supportsMultipleEditorsPerDocument: false
       }

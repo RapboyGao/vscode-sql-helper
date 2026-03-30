@@ -52,7 +52,7 @@ async fn handle_sqlite(request: &NativeRequest) -> Result<NativeResponse> {
         return Ok(NativeResponse::success(request.request_id.clone(), data));
     }
 
-    let pool = sqlite::connect(&request.connection).await?;
+    let pool = sqlite::connect(&request.connection, request.readonly.unwrap_or(false)).await?;
     let response = match request.operation.as_str() {
         "testConnection" => NativeResponse::success(request.request_id.clone(), json!({ "ok": true })),
         "listSchemas" => NativeResponse::success(request.request_id.clone(), sqlite::list_schemas(&pool).await?),

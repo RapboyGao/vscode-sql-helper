@@ -127,8 +127,7 @@ onMounted(() => {
     />
 
     <section v-else class="empty-state empty-root">
-      Waiting for extension data.
+      Loading database metadata...
     </section>
   </main>
 </template>
-

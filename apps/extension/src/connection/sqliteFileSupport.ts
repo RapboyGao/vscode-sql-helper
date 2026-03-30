@@ -32,6 +32,7 @@ export async function addSqliteFileConnection(
     (await store.upsert({
       ...createEmptyConnectionForm("sqlite"),
       name: fileUri.path.split("/").pop() ?? "SQLite Database",
+      readonly: true,
       filePath: fileUri.fsPath
     }));
 

@@ -61,7 +61,7 @@ export class TableDataPanel {
 
     this.panel.title = title ?? (table ? `${connection.name}: ${table}` : `${connection.name}: Data`);
     this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, this.panel.title);
-    await this.postBootstrap();
+    void this.postBootstrap();
     if (!targetPanel) {
       this.panel.reveal(vscode.ViewColumn.Active);
     }
@@ -79,7 +79,7 @@ export class TableDataPanel {
       "listTables",
       selectedSchema ? { schema: selectedSchema } : {}
     );
-    const selectedTable = this.selectedTable ?? tablesResponse.data?.tables?.[0]?.name;
+    const selectedTable = this.selectedTable;
     const query: TableQuery = {
       ...DEFAULT_QUERY,
       schema: selectedSchema,
