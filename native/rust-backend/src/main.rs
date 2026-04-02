@@ -105,37 +105,97 @@ async fn handle_sqlite(request: &NativeRequest) -> Result<NativeResponse> {
 }
 
 async fn handle_mysql(request: &NativeRequest) -> Result<NativeResponse> {
-    use adapters::mysql;
+    use adapters::{ddl, mysql};
 
     let pool = mysql::connect(&request.connection).await?;
-    let data = match request.operation.as_str() {
-        "testConnection" => json!({ "ok": true }),
-        "listSchemas" => mysql::list_schemas(&pool).await?,
-        "listTables" => mysql::list_tables(
-            &pool,
-            request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
-        )
-        .await?,
+    let response = match request.operation.as_str() {
+        "testConnection" => NativeResponse::success(request.request_id.clone(), json!({ "ok": true })),
+        "listSchemas" => NativeResponse::success(request.request_id.clone(), mysql::list_schemas(&pool).await?),
+        "listTables" => NativeResponse::success(
+            request.request_id.clone(),
+            mysql::list_tables(
+                &pool,
+                request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
+            )
+            .await?,
+        ),
+        "describeTable" => NativeResponse::success(
+            request.request_id.clone(),
+            mysql::describe_table(
+                &pool,
+                request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
+                request
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.get("table"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("table is required"))?,
+            )
+            .await?,
+        ),
+        "previewDDL" => {
+            let ddl_payload = ddl::parse_payload(request.payload.clone())?;
+            let preview = ddl::build_preview(&request.connection, &ddl_payload)?;
+            NativeResponse::success_with_preview(request.request_id.clone(), None, preview)
+        }
+        "applyDDL" => {
+            let ddl_payload = ddl::parse_payload(request.payload.clone())?;
+            let preview = ddl::build_preview(&request.connection, &ddl_payload)?;
+            for statement in preview.statements.iter() {
+                sqlx::query(statement).execute(&pool).await?;
+            }
+            NativeResponse::success_with_preview(request.request_id.clone(), Some(json!({ "applied": true })), preview)
+        }
         _ => return Err(anyhow!("This MySQL operation is not implemented in the MVP native scaffold")),
     };
 
-    Ok(NativeResponse::success(request.request_id.clone(), data))
+    Ok(response)
 }
 
 async fn handle_postgres(request: &NativeRequest) -> Result<NativeResponse> {
-    use adapters::postgres;
+    use adapters::{ddl, postgres};
 
     let pool = postgres::connect(&request.connection).await?;
-    let data = match request.operation.as_str() {
-        "testConnection" => json!({ "ok": true }),
-        "listSchemas" => postgres::list_schemas(&pool).await?,
-        "listTables" => postgres::list_tables(
-            &pool,
-            request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
-        )
-        .await?,
+    let response = match request.operation.as_str() {
+        "testConnection" => NativeResponse::success(request.request_id.clone(), json!({ "ok": true })),
+        "listSchemas" => NativeResponse::success(request.request_id.clone(), postgres::list_schemas(&pool).await?),
+        "listTables" => NativeResponse::success(
+            request.request_id.clone(),
+            postgres::list_tables(
+                &pool,
+                request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
+            )
+            .await?,
+        ),
+        "describeTable" => NativeResponse::success(
+            request.request_id.clone(),
+            postgres::describe_table(
+                &pool,
+                request.payload.as_ref().and_then(|payload| payload.get("schema")).and_then(Value::as_str),
+                request
+                    .payload
+                    .as_ref()
+                    .and_then(|payload| payload.get("table"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| anyhow!("table is required"))?,
+            )
+            .await?,
+        ),
+        "previewDDL" => {
+            let ddl_payload = ddl::parse_payload(request.payload.clone())?;
+            let preview = ddl::build_preview(&request.connection, &ddl_payload)?;
+            NativeResponse::success_with_preview(request.request_id.clone(), None, preview)
+        }
+        "applyDDL" => {
+            let ddl_payload = ddl::parse_payload(request.payload.clone())?;
+            let preview = ddl::build_preview(&request.connection, &ddl_payload)?;
+            for statement in preview.statements.iter() {
+                sqlx::query(statement).execute(&pool).await?;
+            }
+            NativeResponse::success_with_preview(request.request_id.clone(), Some(json!({ "applied": true })), preview)
+        }
         _ => return Err(anyhow!("This PostgreSQL operation is not implemented in the MVP native scaffold")),
     };
 
-    Ok(NativeResponse::success(request.request_id.clone(), data))
+    Ok(response)
 }

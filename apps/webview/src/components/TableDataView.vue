@@ -18,6 +18,7 @@ import {
 import { computed, ref, watch } from "vue";
 import type {
   ColumnSchema,
+  DdlPayload,
   PendingTableChange,
   PendingTableDelete,
   PendingTableInsert,
@@ -39,6 +40,23 @@ type TextEditorState = {
   columnName: string;
   value: string;
 } | null;
+type TableActionModal = "create" | "rename" | "delete" | null;
+type TableCreateColumnDraft = {
+  id: string;
+  name: string;
+  dataType: string;
+  nullable: boolean;
+  defaultValue: string;
+  primaryKey: boolean;
+  unique: boolean;
+  autoIncrement: boolean;
+};
+type ColumnDraft = ColumnSchema & {
+  id: string;
+  originalName?: string;
+  isNew?: boolean;
+  markedForDelete?: boolean;
+};
 
 const props = defineProps<{
   connection: SavedConnection;
@@ -51,16 +69,19 @@ const props = defineProps<{
   structure?: TableSchema;
   logs: Array<{ id: string; timestamp: string; operation: string; success: boolean; objectName: string }>;
   applySignal: number;
+  sqlPreview?: { title: string; statements: string[] } | null;
 }>();
 
 const emit = defineEmits<{
   query: [query: TableQuery];
   applyChanges: [payload: { schema?: string; table: string; changes: PendingTableChange[] }];
-  preview: [payload: { action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn"; schema?: string; table: string; nextTable?: string; column?: string; nextColumn?: string; definition?: Partial<TableSchema> }];
-  apply: [payload: { action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn"; schema?: string; table: string; nextTable?: string; column?: string; nextColumn?: string; definition?: Partial<TableSchema> }];
+  preview: [payload: DdlPayload];
+  apply: [payload: DdlPayload];
+  previewColumns: [payload: { schema?: string; table: string; actions: DdlPayload[] }];
+  applyColumns: [payload: { schema?: string; table: string; actions: DdlPayload[] }];
 }>();
 
-const activeTab = ref<"structure" | "data" | "pending" | "logs">("data");
+const activeTab = ref<"columns" | "data" | "pending" | "logs">("data");
 const keyword = ref(props.query.keyword ?? "");
 const selectedSearchColumn = ref<string>("__all__");
 const selectedSchema = ref(props.selectedSchema ?? props.schemas[0] ?? "");
@@ -73,6 +94,11 @@ const pendingDeletes = ref<DeleteMap>({});
 const pendingInserts = ref<PendingTableInsert[]>([]);
 const applyingPending = ref(false);
 const textEditor = ref<TextEditorState>(null);
+const tableActionModal = ref<TableActionModal>(null);
+const tableNameDraft = ref("");
+const deleteConfirmationDraft = ref("");
+const createTableColumns = ref<TableCreateColumnDraft[]>([]);
+const columnDrafts = ref<ColumnDraft[]>([]);
 
 watch(
   () => props.selectedSchema,
@@ -118,6 +144,7 @@ watch(
     clearAllPending();
     selectedSearchColumn.value = "__all__";
     textEditor.value = null;
+    resetColumnDrafts();
     activeTab.value = "data";
   }
 );
@@ -145,8 +172,26 @@ const totalPages = computed(() => {
 const currentPage = computed(() => (props.result?.page ?? props.query.page ?? 0) + 1);
 const pageOffset = computed(() => (props.result?.page ?? props.query.page ?? 0) * (props.result?.pageSize ?? props.query.pageSize ?? 50));
 const visibleColumns = computed(() => props.result?.columns ?? props.structure?.columns ?? []);
+const effectiveStructureColumns = computed<ColumnDraft[]>(() => columnDrafts.value);
 const searchableColumns = computed(() =>
   visibleColumns.value.filter((column) => /(char|text|clob|json|uuid|varchar)/i.test(column.dataType))
+);
+const isReadonlyConnection = computed(() => props.connection.readonly);
+const dbType = computed(() => props.connection.type);
+const selectedSchemaValue = computed(() => selectedSchema.value || undefined);
+const canRenameExistingColumns = computed(() => true);
+const canDeleteExistingColumns = computed(() => dbType.value !== "sqlite");
+const canBasicEditExistingColumns = computed(() => dbType.value === "mysql" || dbType.value === "postgresql");
+const tableTypeOptions = computed(() => columnTypeOptions(dbType.value));
+const hasSelectedTable = computed(() => Boolean(selectedTable.value));
+const hasColumnDraftChanges = computed(() => buildColumnActions().length > 0);
+
+watch(
+  () => props.structure,
+  () => {
+    resetColumnDrafts();
+  },
+  { deep: true, immediate: true }
 );
 
 const pendingUpdates = computed<PendingTableUpdate[]>(() => {
@@ -409,6 +454,391 @@ function setInsertDraftValue(columnName: string, value: string): void {
     ...insertDraft.value,
     [columnName]: value
   };
+}
+
+function createDraftId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function columnTypeOptions(type: SavedConnection["type"]): string[] {
+  switch (type) {
+    case "mysql":
+      return ["VARCHAR(255)", "TEXT", "INT", "BIGINT", "DECIMAL(10,2)", "BOOLEAN", "DATE", "DATETIME", "TIMESTAMP", "JSON"];
+    case "postgresql":
+      return ["text", "varchar", "integer", "bigint", "numeric", "boolean", "date", "timestamp", "jsonb", "uuid"];
+    default:
+      return ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB", "date", "datetime"];
+  }
+}
+
+function resetTableCreateDraft(): void {
+  tableNameDraft.value = "";
+  deleteConfirmationDraft.value = "";
+  createTableColumns.value = [createEmptyTableColumnDraft()];
+}
+
+function createEmptyTableColumnDraft(): TableCreateColumnDraft {
+  return {
+    id: createDraftId("table-column"),
+    name: "",
+    dataType: tableTypeOptions.value[0] ?? "TEXT",
+    nullable: true,
+    defaultValue: "",
+    primaryKey: false,
+    unique: false,
+    autoIncrement: false
+  };
+}
+
+function openTableModal(mode: TableActionModal): void {
+  tableActionModal.value = mode;
+  if (mode === "create") {
+    resetTableCreateDraft();
+    return;
+  }
+
+  tableNameDraft.value = selectedTable.value ?? "";
+  deleteConfirmationDraft.value = "";
+}
+
+function closeTableModal(): void {
+  tableActionModal.value = null;
+}
+
+function addCreateTableColumn(): void {
+  createTableColumns.value = [...createTableColumns.value, createEmptyTableColumnDraft()];
+}
+
+function removeCreateTableColumn(id: string): void {
+  if (createTableColumns.value.length <= 1) {
+    return;
+  }
+  createTableColumns.value = createTableColumns.value.filter((column) => column.id !== id);
+}
+
+function toColumnSchemaDraft(column: TableCreateColumnDraft): ColumnSchema {
+  return {
+    name: column.name.trim(),
+    dataType: column.dataType,
+    nullable: column.nullable,
+    defaultValue: column.defaultValue.trim() || undefined,
+    primaryKey: column.primaryKey,
+    unique: column.unique,
+    autoIncrement: column.autoIncrement
+  };
+}
+
+function createTablePayload(): DdlPayload | null {
+  const name = tableNameDraft.value.trim();
+  if (!name) {
+    return null;
+  }
+  const columns = createTableColumns.value
+    .map(toColumnSchemaDraft)
+    .filter((column) => column.name && column.dataType);
+  if (!columns.length) {
+    return null;
+  }
+
+  return {
+    action: "createTable",
+    schema: selectedSchemaValue.value,
+    table: name,
+    definition: {
+      name,
+      columns,
+      primaryKeys: columns.filter((column) => column.primaryKey).map((column) => column.name)
+    }
+  };
+}
+
+function previewCurrentTableAction(): void {
+  const payload = currentTableActionPayload();
+  if (payload) {
+    emit("preview", payload);
+  }
+}
+
+function applyCurrentTableAction(): void {
+  const payload = currentTableActionPayload();
+  if (payload) {
+    emit("apply", payload);
+    closeTableModal();
+  }
+}
+
+function currentTableActionPayload(): DdlPayload | null {
+  if (tableActionModal.value === "create") {
+    return createTablePayload();
+  }
+
+  if (!selectedTable.value) {
+    return null;
+  }
+
+  if (tableActionModal.value === "rename") {
+    const nextTable = tableNameDraft.value.trim();
+    if (!nextTable || nextTable === selectedTable.value) {
+      return null;
+    }
+    return {
+      action: "renameTable",
+      schema: selectedSchemaValue.value,
+      table: selectedTable.value,
+      nextTable
+    };
+  }
+
+  if (tableActionModal.value === "delete") {
+    if (deleteConfirmationDraft.value.trim() !== selectedTable.value) {
+      return null;
+    }
+    return {
+      action: "deleteTable",
+      schema: selectedSchemaValue.value,
+      table: selectedTable.value
+    };
+  }
+
+  return null;
+}
+
+function resetColumnDrafts(): void {
+  columnDrafts.value = (props.structure?.columns ?? []).map((column) => ({
+    ...column,
+    id: createDraftId("column"),
+    originalName: column.name,
+    markedForDelete: false,
+    isNew: false
+  }));
+}
+
+function addColumnDraft(): void {
+  columnDrafts.value = [
+    ...columnDrafts.value,
+    {
+      id: createDraftId("column"),
+      name: "",
+      dataType: tableTypeOptions.value[0] ?? "TEXT",
+      nullable: true,
+      defaultValue: undefined,
+      primaryKey: false,
+      unique: false,
+      autoIncrement: false,
+      isNew: true,
+      markedForDelete: false
+    }
+  ];
+}
+
+function updateColumnDraft(id: string, patch: Partial<ColumnDraft>): void {
+  columnDrafts.value = columnDrafts.value.map((column) => (column.id === id ? { ...column, ...patch } : column));
+}
+
+function toggleColumnDelete(id: string): void {
+  const target = columnDrafts.value.find((column) => column.id === id);
+  if (!target) {
+    return;
+  }
+
+  if (target.isNew) {
+    columnDrafts.value = columnDrafts.value.filter((column) => column.id !== id);
+    return;
+  }
+
+  columnDrafts.value = columnDrafts.value.map((column) =>
+    column.id === id ? { ...column, markedForDelete: !column.markedForDelete } : column
+  );
+}
+
+function resetColumns(): void {
+  resetColumnDrafts();
+}
+
+function normalizeDefaultValue(value: string | null | undefined): string | undefined {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+function originalColumn(name?: string): ColumnSchema | undefined {
+  return props.structure?.columns.find((column) => column.name === name);
+}
+
+function isColumnFieldEditable(column: ColumnDraft, field: "name" | "dataType" | "nullable" | "defaultValue" | "primaryKey" | "unique" | "autoIncrement"): boolean {
+  if (isReadonlyConnection.value) {
+    return false;
+  }
+  if (column.isNew) {
+    return true;
+  }
+  if (field === "name") {
+    return canRenameExistingColumns.value;
+  }
+  if (field === "dataType" || field === "nullable" || field === "defaultValue") {
+    return canBasicEditExistingColumns.value;
+  }
+  return false;
+}
+
+function canDeleteColumn(column: ColumnDraft): boolean {
+  if (isReadonlyConnection.value) {
+    return false;
+  }
+  if (column.isNew) {
+    return true;
+  }
+  if (column.primaryKey || column.autoIncrement) {
+    return false;
+  }
+  return canDeleteExistingColumns.value;
+}
+
+function buildColumnActions(): DdlPayload[] {
+  if (!selectedTable.value) {
+    return [];
+  }
+
+  const schema = selectedSchemaValue.value;
+  const actions: DdlPayload[] = [];
+
+  for (const column of columnDrafts.value) {
+    if (column.isNew && !column.markedForDelete && column.name.trim()) {
+      actions.push({
+        action: "addColumn",
+        schema,
+        table: selectedTable.value,
+        definition: {
+          name: selectedTable.value,
+          columns: [
+            {
+              name: column.name.trim(),
+              dataType: column.dataType,
+              nullable: column.nullable,
+              defaultValue: normalizeDefaultValue(column.defaultValue),
+              primaryKey: column.primaryKey,
+              unique: column.unique,
+              autoIncrement: column.autoIncrement
+            }
+          ],
+          primaryKeys: []
+        }
+      });
+      continue;
+    }
+
+    if (!column.originalName) {
+      continue;
+    }
+
+    if (column.markedForDelete) {
+      actions.push({
+        action: "deleteColumn",
+        schema,
+        table: selectedTable.value,
+        column: column.originalName
+      });
+      continue;
+    }
+
+    const original = originalColumn(column.originalName);
+    if (!original) {
+      continue;
+    }
+
+    if (column.name.trim() && column.name.trim() !== column.originalName) {
+      actions.push({
+        action: "renameColumn",
+        schema,
+        table: selectedTable.value,
+        column: column.originalName,
+        nextColumn: column.name.trim()
+      });
+    }
+
+    const basicChanged =
+      column.dataType !== original.dataType ||
+      column.nullable !== original.nullable ||
+      normalizeDefaultValue(column.defaultValue) !== normalizeDefaultValue(original.defaultValue ?? undefined);
+
+    if (basicChanged && canBasicEditExistingColumns.value) {
+      actions.push({
+        action: "editColumn",
+        schema,
+        table: selectedTable.value,
+        column: column.name.trim() || column.originalName,
+        definition: {
+          name: selectedTable.value,
+          columns: [
+            {
+              name: column.name.trim() || column.originalName,
+              dataType: column.dataType,
+              nullable: column.nullable,
+              defaultValue: normalizeDefaultValue(column.defaultValue),
+              primaryKey: original.primaryKey,
+              unique: original.unique,
+              autoIncrement: original.autoIncrement
+            }
+          ],
+          primaryKeys: []
+        }
+      });
+    }
+  }
+
+  const weight = (action: DdlPayload["action"]): number => {
+    switch (action) {
+      case "renameColumn":
+        return 1;
+      case "editColumn":
+        return 2;
+      case "addColumn":
+        return 3;
+      case "deleteColumn":
+        return 4;
+      default:
+        return 9;
+    }
+  };
+
+  return actions.sort((left, right) => weight(left.action) - weight(right.action));
+}
+
+function previewColumnActions(): void {
+  const actions = buildColumnActions();
+  if (!actions.length || !selectedTable.value) {
+    return;
+  }
+  emit("previewColumns", {
+    schema: selectedSchemaValue.value,
+    table: selectedTable.value,
+    actions
+  });
+}
+
+function applyColumnActions(): void {
+  const actions = buildColumnActions();
+  if (!actions.length || !selectedTable.value) {
+    return;
+  }
+  emit("applyColumns", {
+    schema: selectedSchemaValue.value,
+    table: selectedTable.value,
+    actions
+  });
+}
+
+function columnCellChanged(column: ColumnDraft, field: "name" | "dataType" | "nullable" | "defaultValue" | "primaryKey" | "unique" | "autoIncrement"): boolean {
+  if (column.isNew) {
+    return true;
+  }
+  const original = originalColumn(column.originalName);
+  if (!original) {
+    return false;
+  }
+  if (field === "defaultValue") {
+    return normalizeDefaultValue(column.defaultValue) !== normalizeDefaultValue(original.defaultValue ?? undefined);
+  }
+  return column[field] !== original[field];
 }
 
 function buildInsertRow(): Record<string, unknown> {
@@ -674,7 +1104,18 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
       <div class="table-menu">
         <div class="subheader">
           <h2>Tables</h2>
-          <span class="badge">{{ tables.length }}</span>
+          <div class="actions">
+            <span class="badge">{{ tables.length }}</span>
+            <button
+              class="secondary icon-button"
+              title="New Table"
+              aria-label="New Table"
+              :disabled="isReadonlyConnection"
+              @click="openTableModal('create')"
+            >
+              <MdiIcon :path="mdiPlusCircleOutline" />
+            </button>
+          </div>
         </div>
         <button
           v-for="table in tables"
@@ -699,10 +1140,24 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               <span>{{ selectedTable || "Choose a table" }}</span>
             </h1>
           </div>
+          <div class="actions" v-if="selectedSchema">
+            <button class="secondary action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="openTableModal('rename')">
+              <MdiIcon :path="mdiTableEdit" />
+              <span>Rename</span>
+            </button>
+            <button class="danger action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="openTableModal('delete')">
+              <MdiIcon :path="mdiDeleteOutline" />
+              <span>Delete</span>
+            </button>
+            <button class="secondary action-button" :disabled="!hasSelectedTable" @click="activeTab = 'columns'">
+              <MdiIcon :path="mdiTableColumn" />
+              <span>Open Columns</span>
+            </button>
+          </div>
         </div>
 
         <nav class="tabs">
-          <button :class="{ active: activeTab === 'structure' }" title="Structure" aria-label="Structure" @click="activeTab = 'structure'">
+          <button :class="{ active: activeTab === 'columns' }" title="Columns" aria-label="Columns" @click="activeTab = 'columns'">
             <MdiIcon :path="mdiTableColumn" />
           </button>
           <button :class="{ active: activeTab === 'data' }" title="Data" aria-label="Data" @click="activeTab = 'data'">
@@ -1007,12 +1462,30 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
         </div>
       </section>
 
-      <section v-else-if="activeTab === 'structure'" class="surface-stack">
+      <section v-else-if="activeTab === 'columns'" class="surface-stack">
         <div class="card">
           <div class="subheader">
             <h2>Columns</h2>
+            <div class="actions">
+              <button class="secondary action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="addColumnDraft">
+                <MdiIcon :path="mdiPlusCircleOutline" />
+                <span>Add Column</span>
+              </button>
+              <button class="secondary action-button" :disabled="!hasColumnDraftChanges" @click="previewColumnActions">
+                <MdiIcon :path="mdiMagnify" />
+                <span>Preview</span>
+              </button>
+              <button class="action-button" :disabled="isReadonlyConnection || !hasColumnDraftChanges" @click="applyColumnActions">
+                <MdiIcon :path="mdiPlayCircleOutline" />
+                <span>Apply</span>
+              </button>
+              <button class="secondary action-button" :disabled="!hasColumnDraftChanges" @click="resetColumns">
+                <MdiIcon :path="mdiRestore" />
+                <span>Reset</span>
+              </button>
+            </div>
           </div>
-          <table v-if="structure">
+          <table v-if="effectiveStructureColumns.length">
             <thead>
               <tr>
                 <th>Name</th>
@@ -1022,22 +1495,66 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 <th>PK</th>
                 <th>Unique</th>
                 <th>Auto Increment</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="column in structure.columns" :key="column.name">
-                <td>{{ column.name }}</td>
-                <td>{{ column.dataType }}</td>
-                <td>{{ column.nullable ? "YES" : "NO" }}</td>
-                <td>{{ column.defaultValue ?? "" }}</td>
+              <tr v-for="column in effectiveStructureColumns" :key="column.id" :class="{ 'pending-insert-row': column.isNew, 'pending-delete-row': column.markedForDelete }">
+                <td :class="{ 'changed-cell': columnCellChanged(column, 'name') }">
+                  <input
+                    :value="column.name"
+                    :disabled="!isColumnFieldEditable(column, 'name')"
+                    :class="{ 'changed-input': columnCellChanged(column, 'name'), 'readonly-input': !isColumnFieldEditable(column, 'name') }"
+                    @input="updateColumnDraft(column.id, { name: ($event.target as HTMLInputElement).value })"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': columnCellChanged(column, 'dataType') }">
+                  <select
+                    :value="column.dataType"
+                    :disabled="!isColumnFieldEditable(column, 'dataType')"
+                    :class="{ 'changed-input': columnCellChanged(column, 'dataType'), 'readonly-input': !isColumnFieldEditable(column, 'dataType') }"
+                    @change="updateColumnDraft(column.id, { dataType: ($event.target as HTMLSelectElement).value })"
+                  >
+                    <option v-for="option in tableTypeOptions" :key="option" :value="option">{{ option }}</option>
+                  </select>
+                </td>
+                <td :class="{ 'changed-cell': columnCellChanged(column, 'nullable') }">
+                  <input
+                    type="checkbox"
+                    :checked="column.nullable"
+                    :disabled="!isColumnFieldEditable(column, 'nullable')"
+                    :class="{ 'changed-input': columnCellChanged(column, 'nullable'), 'readonly-input': !isColumnFieldEditable(column, 'nullable') }"
+                    @change="updateColumnDraft(column.id, { nullable: ($event.target as HTMLInputElement).checked })"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': columnCellChanged(column, 'defaultValue') }">
+                  <input
+                    :value="column.defaultValue ?? ''"
+                    :disabled="!isColumnFieldEditable(column, 'defaultValue')"
+                    :class="{ 'changed-input': columnCellChanged(column, 'defaultValue'), 'readonly-input': !isColumnFieldEditable(column, 'defaultValue') }"
+                    @input="updateColumnDraft(column.id, { defaultValue: ($event.target as HTMLInputElement).value })"
+                  />
+                </td>
                 <td>{{ column.primaryKey ? "YES" : "NO" }}</td>
                 <td>{{ column.unique ? "YES" : "NO" }}</td>
                 <td>{{ column.autoIncrement ? "YES" : "NO" }}</td>
+                <td class="row-actions">
+                  <button
+                    class="danger icon-button"
+                    title="Delete Column"
+                    aria-label="Delete Column"
+                    :disabled="!canDeleteColumn(column)"
+                    @click="toggleColumnDelete(column.id)"
+                  >
+                    <MdiIcon :path="mdiDeleteOutline" />
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
-          <p v-else class="empty-state">Choose a table to inspect its structure.</p>
+          <p v-else class="empty-state">Choose a table to inspect and manage its columns.</p>
         </div>
+
       </section>
 
       <section v-else class="card">
@@ -1070,6 +1587,77 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
           </div>
           <textarea v-model="textEditor.value" rows="12" class="modal-textarea" />
         </div>
+      </div>
+
+      <div v-if="tableActionModal" class="modal-backdrop" @click.self="closeTableModal">
+        <div class="modal-card">
+          <div class="subheader">
+            <h2>
+              {{
+                tableActionModal === 'create'
+                  ? 'Create Table'
+                  : tableActionModal === 'rename'
+                    ? 'Rename Table'
+                    : 'Delete Table'
+              }}
+            </h2>
+            <div class="actions">
+              <button class="secondary" type="button" @click="closeTableModal">Cancel</button>
+              <button class="secondary" type="button" @click="previewCurrentTableAction">Preview SQL</button>
+              <button type="button" @click="applyCurrentTableAction">
+                {{ tableActionModal === 'delete' ? 'Delete' : tableActionModal === 'create' ? 'Create' : 'Rename' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="tableActionModal === 'create'" class="surface-stack">
+            <label>
+              <span>Table Name</span>
+              <input v-model="tableNameDraft" placeholder="users" />
+            </label>
+            <div class="subheader">
+              <h2>Columns</h2>
+              <button class="secondary action-button" type="button" @click="addCreateTableColumn">
+                <MdiIcon :path="mdiPlusCircleOutline" />
+                <span>Add Column</span>
+              </button>
+            </div>
+            <div class="modal-grid" v-for="column in createTableColumns" :key="column.id">
+              <input v-model="column.name" placeholder="Column name" />
+              <select v-model="column.dataType">
+                <option v-for="option in tableTypeOptions" :key="option" :value="option">{{ option }}</option>
+              </select>
+              <input v-model="column.defaultValue" placeholder="Default value" />
+              <label class="inline-check"><input type="checkbox" v-model="column.nullable" /> Nullable</label>
+              <label class="inline-check"><input type="checkbox" v-model="column.primaryKey" /> PK</label>
+              <label class="inline-check"><input type="checkbox" v-model="column.unique" /> Unique</label>
+              <label class="inline-check"><input type="checkbox" v-model="column.autoIncrement" /> Auto</label>
+              <button class="danger icon-button" type="button" :disabled="createTableColumns.length <= 1" @click="removeCreateTableColumn(column.id)">
+                <MdiIcon :path="mdiDeleteOutline" />
+              </button>
+            </div>
+          </div>
+
+          <div v-else-if="tableActionModal === 'rename'" class="surface-stack">
+            <label>
+              <span>New Table Name</span>
+              <input v-model="tableNameDraft" />
+            </label>
+          </div>
+
+          <div v-else class="surface-stack">
+            <p>Type <strong>{{ selectedTable }}</strong> to confirm table deletion.</p>
+            <input v-model="deleteConfirmationDraft" :placeholder="selectedTable" />
+          </div>
+        </div>
+      </div>
+
+      <div v-if="sqlPreview?.statements?.length" class="card preview-card">
+        <div class="subheader">
+          <h2>{{ sqlPreview.title }}</h2>
+          <span class="badge">{{ sqlPreview.statements.length }}</span>
+        </div>
+        <pre>{{ sqlPreview.statements.join('\n') }}</pre>
       </div>
     </section>
   </section>

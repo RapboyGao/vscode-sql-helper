@@ -35,3 +35,46 @@ pub async fn list_tables(pool: &MySqlPool, schema: Option<&str>) -> Result<Value
     Ok(json!({ "tables": tables }))
 }
 
+pub async fn describe_table(pool: &MySqlPool, schema: Option<&str>, table: &str) -> Result<Value> {
+    let database = schema.ok_or_else(|| anyhow!("schema is required for MySQL"))?;
+    let sql = format!(
+        "SELECT c.column_name, c.column_type, c.is_nullable, c.column_default, c.column_key, c.extra \
+         FROM information_schema.columns c \
+         WHERE c.table_schema = '{}' AND c.table_name = '{}' \
+         ORDER BY c.ordinal_position",
+        database.replace('\'', "''"),
+        table.replace('\'', "''")
+    );
+    let rows = sqlx::query(&sql).fetch_all(pool).await?;
+    let columns = rows
+        .into_iter()
+        .map(|row| {
+            let column_key = row.get::<String, _>("column_key");
+            let extra = row.get::<String, _>("extra").to_lowercase();
+            json!({
+                "name": row.get::<String, _>("column_name"),
+                "dataType": row.get::<String, _>("column_type"),
+                "nullable": row.get::<String, _>("is_nullable") == "YES",
+                "defaultValue": row.try_get::<Option<String>, _>("column_default").ok().flatten(),
+                "primaryKey": column_key == "PRI",
+                "unique": column_key == "UNI",
+                "autoIncrement": extra.contains("auto_increment")
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let primary_keys = columns
+        .iter()
+        .filter(|column| column.get("primaryKey").and_then(Value::as_bool).unwrap_or(false))
+        .filter_map(|column| column.get("name").and_then(Value::as_str).map(ToString::to_string))
+        .collect::<Vec<_>>();
+
+    Ok(json!({
+        "table": {
+            "schema": database,
+            "name": table,
+            "columns": columns,
+            "primaryKeys": primary_keys
+        }
+    }))
+}

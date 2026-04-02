@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import type {
+  DdlPayload,
   DescribeTableResult,
   ExtensionToWebviewMessage,
   PendingTableChange,
@@ -277,6 +278,16 @@ export class TableDataPanel {
         }
 
         if (message.type === "schema/apply") {
+          if (message.payload.action === "createTable") {
+            this.selectedTable = message.payload.table;
+            this.selectedSchema = message.payload.schema;
+          } else if (message.payload.action === "renameTable") {
+            this.selectedTable = message.payload.nextTable ?? message.payload.table;
+            this.selectedSchema = message.payload.schema;
+          } else if (message.payload.action === "deleteTable") {
+            this.selectedSchema = message.payload.schema;
+            this.selectedTable = undefined;
+          }
           await this.logStore.append({
             connectionName: this.connection.name,
             objectName: message.payload.table,
@@ -299,6 +310,66 @@ export class TableDataPanel {
               payload: { code: "UNKNOWN", message: toUserMessage(error) }
             } satisfies ExtensionToWebviewMessage);
           }
+        }
+        return;
+      } catch (error) {
+        await this.panel.webview.postMessage({
+          type: "ui/error",
+          payload: { code: "UNKNOWN", message: toUserMessage(error) }
+        } satisfies ExtensionToWebviewMessage);
+        return;
+      }
+    }
+
+    if ((message as WebviewToExtensionMessage).type === "columns/preview" || (message as WebviewToExtensionMessage).type === "columns/apply") {
+      try {
+        const columnMessage = message as Extract<WebviewToExtensionMessage, { type: "columns/preview" | "columns/apply" }>;
+        const isApply = columnMessage.type === "columns/apply";
+        const previews: string[] = [];
+
+        for (const action of columnMessage.payload.actions) {
+          const operation = isApply ? "applyDDL" : "previewDDL";
+          const response = await this.nativeBridge.call(this.connection, operation, action);
+          if (!response.success) {
+            await this.panel.webview.postMessage({
+              type: "ui/error",
+              payload: response.error ?? { code: "UNKNOWN", message: "Column operation failed" }
+            } satisfies ExtensionToWebviewMessage);
+            return;
+          }
+
+          if (response.sqlPreview?.statements?.length) {
+            previews.push(...response.sqlPreview.statements);
+          }
+
+          if (isApply) {
+            await this.logStore.append({
+              connectionName: this.connection.name,
+              objectName: `${columnMessage.payload.table}.${action.column ?? action.nextColumn ?? ""}`.replace(/\.$/, ""),
+              operation: action.action,
+              success: true
+            });
+          }
+        }
+
+        await this.panel.webview.postMessage({
+          type: "schema/sqlPreview",
+          payload: {
+            title: isApply ? "Column apply preview" : "Column preview",
+            statements: previews
+          }
+        } satisfies ExtensionToWebviewMessage);
+
+        if (isApply) {
+          await this.panel.webview.postMessage({
+            type: "schema/applied",
+            payload: {
+              action: "editColumn",
+              table: columnMessage.payload.table
+            }
+          } satisfies ExtensionToWebviewMessage);
+          this.refreshExplorer();
+          await this.postBootstrap();
         }
         return;
       } catch (error) {
@@ -388,6 +459,25 @@ export class TableDataPanel {
         } satisfies ExtensionToWebviewMessage);
       }
     }
+  }
+
+  public async previewDdlActions(actions: DdlPayload[]): Promise<string[]> {
+    if (!this.connection) {
+      return [];
+    }
+
+    const statements: string[] = [];
+    for (const action of actions) {
+      const response = await this.nativeBridge.call(this.connection, "previewDDL", action);
+      if (!response.success) {
+        throw new Error(response.error?.message ?? "Failed to preview DDL");
+      }
+      if (response.sqlPreview?.statements?.length) {
+        statements.push(...response.sqlPreview.statements);
+      }
+    }
+
+    return statements;
   }
 
   private async applyPendingChanges(

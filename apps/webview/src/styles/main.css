@@ -459,7 +459,7 @@ pre {
 
 button:disabled {
   opacity: 0.6;
-  cursor: wait;
+  cursor: not-allowed;
 }
 
 .data-grid,
@@ -537,6 +537,36 @@ button:disabled {
   border: 1px solid color-mix(in srgb, var(--ui-link) 35%, transparent);
   background: color-mix(in srgb, var(--ui-link) 12%, transparent);
   color: var(--ui-fg);
+}
+
+.modal-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr repeat(4, auto) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ui-fg);
+}
+
+.inline-check input[type="checkbox"] {
+  margin: 0;
+}
+
+.surface-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .banner.error {

@@ -216,3 +216,22 @@ export interface DescribeTableResult {
   schema?: string;
   table: TableSchema;
 }
+
+export type DdlAction =
+  | "createTable"
+  | "renameTable"
+  | "deleteTable"
+  | "addColumn"
+  | "editColumn"
+  | "deleteColumn"
+  | "renameColumn";
+
+export interface DdlPayload {
+  action: DdlAction;
+  schema?: string;
+  table: string;
+  nextTable?: string;
+  column?: string;
+  nextColumn?: string;
+  definition?: Partial<TableSchema>;
+}

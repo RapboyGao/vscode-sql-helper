@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import type {
   ConnectionFormState,
+  DdlPayload,
   ExtensionToWebviewMessage,
   PendingTableChange,
   SavedConnection,
@@ -132,6 +133,28 @@ function requestSchemaApply(payload: {
     showNotice(`${payload.action} did not finish. Please try again.`, true);
   }, 8000);
   post({ type: "schema/apply", payload });
+}
+
+function requestColumnsPreview(payload: {
+  schema?: string;
+  table: string;
+  actions: DdlPayload[];
+}): void {
+  post({
+    type: "columns/preview",
+    payload
+  });
+}
+
+function requestColumnsApply(payload: {
+  schema?: string;
+  table: string;
+  actions: DdlPayload[];
+}): void {
+  post({
+    type: "columns/apply",
+    payload
+  });
 }
 
 function requestApplyChanges(payload: {
@@ -281,6 +304,8 @@ onMounted(() => {
       @applyChanges="requestApplyChanges($event)"
       @preview="post({ type: 'schema/preview', payload: $event })"
       @apply="requestSchemaApply($event)"
+      @previewColumns="requestColumnsPreview($event)"
+      @applyColumns="requestColumnsApply($event)"
     />
 
     <section v-else class="empty-state empty-root">

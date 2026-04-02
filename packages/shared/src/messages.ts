@@ -1,6 +1,7 @@
 import type {
   ConnectionFormState,
   DescribeTableResult,
+  DdlPayload,
   NativeError,
   OperationLogEntry,
   PendingTableChange,
@@ -157,26 +158,26 @@ export type WebviewToExtensionMessage =
       };
     }
   | {
-      type: "schema/preview";
+      type: "columns/preview";
       payload: {
-        action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn";
         schema?: string;
         table: string;
-        nextTable?: string;
-        column?: string;
-        nextColumn?: string;
-        definition?: Partial<TableSchema>;
+        actions: DdlPayload[];
       };
     }
   | {
-      type: "schema/apply";
+      type: "columns/apply";
       payload: {
-        action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn";
         schema?: string;
         table: string;
-        nextTable?: string;
-        column?: string;
-        nextColumn?: string;
-        definition?: Partial<TableSchema>;
+        actions: DdlPayload[];
       };
+    }
+  | {
+      type: "schema/preview";
+      payload: DdlPayload;
+    }
+  | {
+      type: "schema/apply";
+      payload: DdlPayload;
     };
