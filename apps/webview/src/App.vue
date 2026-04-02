@@ -134,6 +134,29 @@ function requestSchemaApply(payload: {
   post({ type: "schema/apply", payload });
 }
 
+function requestApplyChanges(payload: {
+  schema?: string;
+  table: string;
+  changes: PendingTableChange[];
+}): void {
+  const plainPayload = JSON.parse(
+    JSON.stringify({
+      schema: payload.schema,
+      table: payload.table,
+      changes: payload.changes
+    })
+  ) as {
+    schema?: string;
+    table: string;
+    changes: PendingTableChange[];
+  };
+
+  post({
+    type: "tableData/applyChanges",
+    payload: plainPayload
+  });
+}
+
 onMounted(() => {
   window.addEventListener("message", (event) => {
     const next = event.data as ExtensionToWebviewMessage;
@@ -192,8 +215,12 @@ onMounted(() => {
         structure.value = next.payload.table.table;
         break;
       case "tableData/appliedChanges":
-        applySignal.value += 1;
-        showNotice(`${next.payload.appliedCount} pending change(s) applied`);
+        if (next.payload.appliedCount > 0) {
+          applySignal.value += 1;
+          showNotice(`${next.payload.appliedCount} pending change(s) applied`);
+        } else {
+          showNotice("No pending changes to apply.", true);
+        }
         break;
       case "schema/sqlPreview":
         sqlPreview.value = next.payload;
@@ -251,7 +278,7 @@ onMounted(() => {
       :sql-preview="sqlPreview"
       :apply-signal="applySignal"
       @query="post({ type: 'tableData/query', payload: $event })"
-      @applyChanges="post({ type: 'tableData/applyChanges', payload: $event })"
+      @applyChanges="requestApplyChanges($event)"
       @preview="post({ type: 'schema/preview', payload: $event })"
       @apply="requestSchemaApply($event)"
     />

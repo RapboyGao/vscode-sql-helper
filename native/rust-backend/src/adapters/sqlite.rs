@@ -49,19 +49,33 @@ pub async fn list_tables(pool: &SqlitePool) -> Result<Value> {
 }
 
 pub async fn describe_table(pool: &SqlitePool, table: &str) -> Result<Value> {
+    let create_sql = sqlx::query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .bind(table)
+        .fetch_optional(pool)
+        .await?
+        .and_then(|row| row.try_get::<Option<String>, _>("sql").ok().flatten())
+        .unwrap_or_default()
+        .to_uppercase();
     let pragma = format!("PRAGMA table_info(\"{}\")", table.replace('"', "\"\""));
     let rows = sqlx::query(&pragma).fetch_all(pool).await?;
     let columns = rows
         .into_iter()
         .map(|row| {
+            let name = row.get::<String, _>("name");
+            let data_type = row.get::<String, _>("type");
+            let primary_key = row.get::<i64, _>("pk") == 1;
+            let auto_increment = primary_key
+                && data_type.to_uppercase().contains("INT")
+                && (create_sql.contains("AUTOINCREMENT")
+                    || create_sql.contains(&format!("\"{}\" INTEGER PRIMARY KEY", name.to_uppercase())));
             json!({
-                "name": row.get::<String, _>("name"),
-                "dataType": row.get::<String, _>("type"),
+                "name": name,
+                "dataType": data_type,
                 "nullable": row.get::<i64, _>("notnull") == 0,
                 "defaultValue": row.try_get::<Option<String>, _>("dflt_value").ok().flatten(),
-                "primaryKey": row.get::<i64, _>("pk") == 1,
+                "primaryKey": primary_key,
                 "unique": false,
-                "autoIncrement": false
+                "autoIncrement": auto_increment
             })
         })
         .collect::<Vec<_>>();

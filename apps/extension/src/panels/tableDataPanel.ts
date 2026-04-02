@@ -28,7 +28,8 @@ export class TableDataPanel {
     private readonly context: vscode.ExtensionContext,
     private readonly nativeBridge: NativeBridge,
     private readonly logStore: OperationLogStore,
-    private readonly refreshExplorer: () => void
+    private readonly refreshExplorer: () => void,
+    private readonly output: vscode.OutputChannel
   ) {}
 
   public async open(
@@ -310,45 +311,104 @@ export class TableDataPanel {
     }
 
     if (message.type === "tableData/insert" || message.type === "tableData/update" || message.type === "tableData/delete") {
-      const operation = message.type === "tableData/insert" ? "insertRows" : message.type === "tableData/update" ? "updateRows" : "deleteRows";
-      const response = await this.nativeBridge.call(this.connection, operation, message.payload);
-      if (!response.success) {
+      try {
+        const operation = message.type === "tableData/insert" ? "insertRows" : message.type === "tableData/update" ? "updateRows" : "deleteRows";
+        const response = await this.nativeBridge.call(this.connection, operation, message.payload);
+        if (!response.success) {
+          await this.panel.webview.postMessage({
+            type: "ui/error",
+            payload: response.error ?? { code: "UNKNOWN", message: "Data operation failed" }
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
+        await this.logStore.append({
+          connectionName: this.connection.name,
+          objectName: message.payload.table,
+          operation,
+          success: true
+        });
+        await this.postBootstrap();
+        return;
+      } catch (error) {
         await this.panel.webview.postMessage({
           type: "ui/error",
-          payload: response.error ?? { code: "UNKNOWN", message: "Data operation failed" }
+          payload: { code: "UNKNOWN", message: toUserMessage(error) }
         } satisfies ExtensionToWebviewMessage);
         return;
       }
-
-      await this.logStore.append({
-        connectionName: this.connection.name,
-        objectName: message.payload.table,
-        operation,
-        success: true
-      });
-      await this.postBootstrap();
     }
 
     if (message.type === "tableData/applyChanges") {
-      const appliedCount = await this.applyPendingChanges(message.payload.changes, message.payload.schema, message.payload.table);
-      await this.panel.webview.postMessage({
-        type: "tableData/appliedChanges",
-        payload: {
-          appliedCount
+      try {
+        const changes = Array.isArray(message.payload.changes) ? message.payload.changes : [];
+        this.output.appendLine(
+          `[applyChanges] table=${message.payload.table} schema=${message.payload.schema ?? "main"} count=${changes.length}`
+        );
+        if (changes.length) {
+          this.output.appendLine(`[applyChanges] payload=${JSON.stringify(changes)}`);
         }
-      } satisfies ExtensionToWebviewMessage);
-      await this.postBootstrap();
+
+        if (!changes.length) {
+          await this.panel.webview.postMessage({
+            type: "ui/error",
+            payload: { code: "UNKNOWN", message: "No pending changes to apply." }
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
+        const outcome = await this.applyPendingChanges(changes, message.payload.schema, message.payload.table);
+        if (outcome.error) {
+          await this.panel.webview.postMessage({
+            type: "ui/error",
+            payload: outcome.error
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
+        if (outcome.appliedCount <= 0) {
+          await this.panel.webview.postMessage({
+            type: "ui/error",
+            payload: { code: "UNKNOWN", message: "No pending changes to apply." }
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
+        await this.panel.webview.postMessage({
+          type: "tableData/appliedChanges",
+          payload: {
+            appliedCount: outcome.appliedCount
+          }
+        } satisfies ExtensionToWebviewMessage);
+        await this.postBootstrap();
+      } catch (error) {
+        await this.panel.webview.postMessage({
+          type: "ui/error",
+          payload: { code: "UNKNOWN", message: toUserMessage(error) }
+        } satisfies ExtensionToWebviewMessage);
+      }
     }
   }
 
-  private async applyPendingChanges(changes: PendingTableChange[], schema: string | undefined, table: string): Promise<number> {
+  private async applyPendingChanges(
+    changes: PendingTableChange[],
+    schema: string | undefined,
+    table: string
+  ): Promise<{ appliedCount: number; error?: { code: string; message: string; details?: string } }> {
     if (!this.connection) {
-      return 0;
+      return {
+        appliedCount: 0,
+        error: {
+          code: "UNKNOWN",
+          message: "No active connection."
+        }
+      };
     }
 
     let appliedCount = 0;
 
     for (const change of changes) {
+      this.output.appendLine(`[applyChanges] executing kind=${change.kind}`);
       const response =
         change.kind === "insert"
           ? await this.nativeBridge.call(this.connection, "insertRows", {
@@ -369,12 +429,19 @@ export class TableDataPanel {
                 key: change.key
               });
 
+      this.output.appendLine(`[applyChanges] response success=${response.success}`);
       if (!response.success) {
-        await this.panel?.webview.postMessage({
-          type: "ui/error",
-          payload: response.error ?? { code: "UNKNOWN", message: "Failed to apply pending changes" }
-        } satisfies ExtensionToWebviewMessage);
-        break;
+        this.output.appendLine(`[applyChanges] error=${JSON.stringify(response.error)}`);
+      }
+
+      if (!response.success) {
+        return {
+          appliedCount,
+          error: response.error ?? {
+            code: "UNKNOWN",
+            message: "Failed to apply pending changes"
+          }
+        };
       }
 
       appliedCount += 1;
@@ -386,6 +453,6 @@ export class TableDataPanel {
       });
     }
 
-    return appliedCount;
+    return { appliedCount };
   }
 }

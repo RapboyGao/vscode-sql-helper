@@ -218,6 +218,16 @@ const rowsForDisplay = computed(() => {
   ];
 });
 
+const hasInsertDraftValues = computed(() =>
+  Object.values(insertDraft.value).some((value) => {
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    return String(value ?? "").trim() !== "";
+  })
+);
+
 function rowKey(row: Record<string, unknown>): string {
   if (!props.result) {
     return JSON.stringify(row);
@@ -401,6 +411,37 @@ function setInsertDraftValue(columnName: string, value: string): void {
   };
 }
 
+function buildInsertRow(): Record<string, unknown> {
+  return visibleColumns.value.reduce<Record<string, unknown>>((row, column) => {
+    if (!isEditableColumn(column.name)) {
+      return row;
+    }
+
+    const raw = insertDraft.value[column.name];
+    const kind = columnInputKind(column.name);
+
+    if (kind === "checkbox") {
+      if (raw === "true") {
+        row[column.name] = true;
+      }
+      return row;
+    }
+
+    const text = String(raw ?? "").trim();
+    if (!text) {
+      return row;
+    }
+
+    if (kind === "number") {
+      row[column.name] = Number(text);
+      return row;
+    }
+
+    row[column.name] = text;
+    return row;
+  }, {});
+}
+
 function openTextEditor(row: Record<string, unknown>, columnName: string): void {
   textEditor.value = {
     source: "existing",
@@ -486,12 +527,21 @@ function goToPage(): void {
 }
 
 function stageInsert(): void {
+  if (!hasInsertDraftValues.value) {
+    return;
+  }
+
+  const row = buildInsertRow();
+  if (!Object.keys(row).length) {
+    return;
+  }
+
   pendingInserts.value = [
     ...pendingInserts.value,
     {
       kind: "insert",
       tempId: `insert-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      row: { ...insertDraft.value }
+      row
     }
   ];
   insertDraft.value = {};
@@ -540,28 +590,32 @@ function applyAllPending(): void {
   }
 
   applyingPending.value = true;
-  const changes = pendingChanges.value.map((change) =>
-    change.kind === "insert"
-      ? {
-          kind: "insert" as const,
-          tempId: change.tempId,
-          row: { ...change.row }
-        }
-      : change.kind === "update"
-        ? {
-            kind: "update" as const,
-            rowKey: change.rowKey,
-            key: { ...change.key },
-            originalRow: { ...change.originalRow },
-            values: { ...change.values }
-          }
-        : {
-            kind: "delete" as const,
-            rowKey: change.rowKey,
-            key: { ...change.key },
-            row: { ...change.row }
-          }
-  );
+  const changes = JSON.parse(
+    JSON.stringify(
+      pendingChanges.value.map((change) =>
+        change.kind === "insert"
+          ? {
+              kind: "insert" as const,
+              tempId: change.tempId,
+              row: { ...change.row }
+            }
+          : change.kind === "update"
+            ? {
+                kind: "update" as const,
+                rowKey: change.rowKey,
+                key: { ...change.key },
+                originalRow: { ...change.originalRow },
+                values: { ...change.values }
+              }
+            : {
+                kind: "delete" as const,
+                rowKey: change.rowKey,
+                key: { ...change.key },
+                row: { ...change.row }
+              }
+      )
+    )
+  ) as PendingTableChange[];
   emit("applyChanges", {
     schema: selectedSchema.value || undefined,
     table: selectedTable.value,
@@ -879,8 +933,15 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
         <div class="card">
           <div class="subheader">
             <h2>Stage New Row</h2>
-            <button class="icon-button" title="Add To Pending" aria-label="Add To Pending" @click="stageInsert">
+            <button
+              class="action-button"
+              title="Add To Pending"
+              aria-label="Add To Pending"
+              :disabled="!hasInsertDraftValues"
+              @click="stageInsert"
+            >
               <MdiIcon :path="mdiPlusCircleOutline" />
+              <span>Stage Row</span>
             </button>
           </div>
           <div class="data-grid">
