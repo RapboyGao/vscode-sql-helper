@@ -9,6 +9,7 @@ import type {
 } from "@usd/shared";
 import { NativeBridge } from "../native/nativeBridge.js";
 import { OperationLogStore } from "../storage/operationLogStore.js";
+import { toUserMessage } from "../utils/errors.js";
 import { renderWebviewHtml } from "./webviewHtml.js";
 
 const DEFAULT_QUERY: TableQuery = {
@@ -256,34 +257,42 @@ export class TableDataPanel {
     }
 
     if (message.type === "schema/preview" || message.type === "schema/apply") {
-      const operation = message.type === "schema/preview" ? "previewDDL" : "applyDDL";
-      const response = await this.nativeBridge.call(this.connection, operation, message.payload);
-      if (!response.success) {
+      try {
+        const operation = message.type === "schema/preview" ? "previewDDL" : "applyDDL";
+        const response = await this.nativeBridge.call(this.connection, operation, message.payload);
+        if (!response.success) {
+          await this.panel.webview.postMessage({
+            type: "ui/error",
+            payload: response.error ?? { code: "UNKNOWN", message: "DDL failed" }
+          } satisfies ExtensionToWebviewMessage);
+          return;
+        }
+
+        if (response.sqlPreview) {
+          await this.panel.webview.postMessage({
+            type: "schema/sqlPreview",
+            payload: response.sqlPreview
+          } satisfies ExtensionToWebviewMessage);
+        }
+
+        if (message.type === "schema/apply") {
+          await this.logStore.append({
+            connectionName: this.connection.name,
+            objectName: message.payload.table,
+            operation: message.payload.action,
+            success: true
+          });
+          this.refreshExplorer();
+          await this.postBootstrap();
+        }
+        return;
+      } catch (error) {
         await this.panel.webview.postMessage({
           type: "ui/error",
-          payload: response.error ?? { code: "UNKNOWN", message: "DDL failed" }
+          payload: { code: "UNKNOWN", message: toUserMessage(error) }
         } satisfies ExtensionToWebviewMessage);
         return;
       }
-
-      if (response.sqlPreview) {
-        await this.panel.webview.postMessage({
-          type: "schema/sqlPreview",
-          payload: response.sqlPreview
-        } satisfies ExtensionToWebviewMessage);
-      }
-
-      if (message.type === "schema/apply") {
-        await this.logStore.append({
-          connectionName: this.connection.name,
-          objectName: message.payload.table,
-          operation: message.payload.action,
-          success: true
-        });
-        this.refreshExplorer();
-        await this.postBootstrap();
-      }
-      return;
     }
 
     if (message.type === "tableData/insert" || message.type === "tableData/update" || message.type === "tableData/delete") {

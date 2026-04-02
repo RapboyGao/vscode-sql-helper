@@ -17,6 +17,7 @@ import {
 } from "@mdi/js";
 import { computed, ref, watch } from "vue";
 import type {
+  ColumnSchema,
   PendingTableChange,
   PendingTableDelete,
   PendingTableInsert,
@@ -32,6 +33,11 @@ import DateTimeEditor from "./DateTimeEditor.vue";
 type RowDraftMap = Record<string, Record<string, unknown>>;
 type DeleteMap = Record<string, boolean>;
 type InputKind = "text" | "number" | "date" | "datetime-local" | "checkbox" | "textarea";
+type StructureColumnDraft = ColumnSchema & {
+  draftId: string;
+  isNew?: boolean;
+  isDeleted?: boolean;
+};
 type TextEditorState = {
   source: "existing" | "insert";
   row?: Record<string, unknown>;
@@ -73,6 +79,7 @@ const pendingDeletes = ref<DeleteMap>({});
 const pendingInserts = ref<PendingTableInsert[]>([]);
 const applyingPending = ref(false);
 const textEditor = ref<TextEditorState>(null);
+const structureDrafts = ref<StructureColumnDraft[]>([]);
 
 watch(
   () => props.selectedSchema,
@@ -132,6 +139,15 @@ watch(
     clearAllPending();
     applyingPending.value = false;
   }
+);
+
+watch(
+  () => props.structure,
+  (value) => {
+    structureDrafts.value =
+      value?.columns.map((column, index) => cloneColumnSchema(column, `column-${index}`)) ?? [];
+  },
+  { deep: true, immediate: true }
 );
 
 const totalPages = computed(() => {
@@ -218,6 +234,27 @@ const rowsForDisplay = computed(() => {
   ];
 });
 
+const changedStructureIndices = computed(() =>
+  structureDrafts.value
+    .map((draft, index) => (structureColumnChanged(index, draft) ? index : -1))
+    .filter((index) => index >= 0)
+);
+
+const firstChangedStructureIndex = computed(() => changedStructureIndices.value[0] ?? -1);
+const hasStructureRowActions = computed(() => structureDrafts.value.some((column, index) => column.isNew || canDeleteStructureColumn(index)));
+const structureTypeOptions = computed(() => {
+  switch (props.connection.type) {
+    case "sqlite":
+      return ["INTEGER", "TEXT", "REAL", "NUMERIC", "BLOB", "datetime", "date"];
+    case "postgresql":
+      return ["text", "varchar", "integer", "bigint", "numeric", "boolean", "date", "timestamp", "jsonb", "uuid"];
+    case "mysql":
+      return ["VARCHAR(255)", "TEXT", "INT", "BIGINT", "DECIMAL(10,2)", "BOOLEAN", "DATE", "DATETIME", "TIMESTAMP", "JSON"];
+    default:
+      return ["TEXT"];
+  }
+});
+
 function rowKey(row: Record<string, unknown>): string {
   if (!props.result) {
     return JSON.stringify(row);
@@ -225,6 +262,21 @@ function rowKey(row: Record<string, unknown>): string {
 
   const primaryKeyValues = props.result.primaryKeys.map((key) => row[key]);
   return primaryKeyValues.length ? JSON.stringify(primaryKeyValues) : JSON.stringify(row);
+}
+
+function cloneColumnSchema(column: ColumnSchema, draftId?: string, isNew = false): StructureColumnDraft {
+  return {
+    name: column.name,
+    dataType: column.dataType,
+    nullable: column.nullable,
+    defaultValue: column.defaultValue ?? "",
+    primaryKey: column.primaryKey,
+    unique: column.unique,
+    autoIncrement: column.autoIncrement,
+    draftId: draftId ?? `column-${column.name}-${Date.now()}`,
+    isNew,
+    isDeleted: false
+  };
 }
 
 function rowKeyPayload(row: Record<string, unknown>): Record<string, unknown> {
@@ -596,6 +648,300 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
 
   return String(pageOffset.value + (entryIndex - pendingInserts.value.length) + 1);
 }
+
+function updateStructureDraft(index: number, key: keyof ColumnSchema, value: string | boolean): void {
+  const next = [...structureDrafts.value];
+  const current = next[index];
+  if (!current) {
+    return;
+  }
+
+  next[index] = {
+    ...current,
+    [key]: value
+  };
+  structureDrafts.value = next;
+}
+
+function originalStructureColumn(index: number): ColumnSchema | undefined {
+  return props.structure?.columns[index];
+}
+
+function structureColumnChanged(index: number, draft?: StructureColumnDraft): boolean {
+  const currentDraft = draft ?? structureDrafts.value[index];
+  if (currentDraft?.isDeleted) {
+    return true;
+  }
+
+  if (currentDraft?.isNew) {
+    return Boolean(currentDraft.name || currentDraft.dataType || currentDraft.defaultValue || currentDraft.primaryKey || currentDraft.unique || currentDraft.autoIncrement || !currentDraft.nullable);
+  }
+
+  const original = originalStructureColumn(index);
+  if (!currentDraft || !original) {
+    return false;
+  }
+
+  return (
+    currentDraft.name !== original.name ||
+    currentDraft.dataType !== original.dataType ||
+    currentDraft.nullable !== original.nullable ||
+    String(currentDraft.defaultValue ?? "") !== String(original.defaultValue ?? "") ||
+    currentDraft.primaryKey !== original.primaryKey ||
+    currentDraft.unique !== original.unique ||
+    currentDraft.autoIncrement !== original.autoIncrement
+  );
+}
+
+function structureCellChanged(index: number, key: keyof ColumnSchema): boolean {
+  const draft = structureDrafts.value[index];
+  if (!draft) {
+    return false;
+  }
+
+  if (draft.isDeleted) {
+    return true;
+  }
+
+  if (draft.isNew) {
+    if (key === "nullable") {
+      return draft.nullable !== true;
+    }
+
+    return String(draft[key] ?? "") !== "";
+  }
+
+  const original = originalStructureColumn(index);
+  if (!original) {
+    return false;
+  }
+
+  return String(draft[key] ?? "") !== String(original[key] ?? "");
+}
+
+function normalizedStructureDefaultValue(value: string | null | undefined): string | undefined {
+  const text = String(value ?? "").trim();
+  return text ? text : undefined;
+}
+
+function buildStructureChangePayload():
+  | {
+      action: "addColumn" | "editColumn" | "renameColumn" | "deleteColumn";
+      schema?: string;
+      table: string;
+      column: string;
+      nextColumn?: string;
+      definition: Partial<TableSchema>;
+    }
+  | null {
+  if (!props.structure || !selectedTable.value || firstChangedStructureIndex.value < 0) {
+    return null;
+  }
+
+  const original = originalStructureColumn(firstChangedStructureIndex.value);
+  const draft = structureDrafts.value[firstChangedStructureIndex.value];
+  if (!draft) {
+    return null;
+  }
+
+  if (draft.isNew) {
+    return {
+      action: "addColumn",
+      schema: selectedSchema.value || undefined,
+      table: selectedTable.value,
+      column: draft.name,
+      definition: {
+        name: props.structure.name,
+        schema: props.structure.schema,
+        primaryKeys: props.structure.primaryKeys,
+        columns: [
+          {
+            name: draft.name,
+            dataType: draft.dataType,
+            nullable: draft.nullable,
+            defaultValue: normalizedStructureDefaultValue(draft.defaultValue),
+            primaryKey: draft.primaryKey,
+            unique: draft.unique,
+            autoIncrement: draft.autoIncrement
+          }
+        ]
+      }
+    };
+  }
+
+  if (!original) {
+    return null;
+  }
+
+  if (draft.isDeleted) {
+    return {
+      action: "deleteColumn",
+      schema: selectedSchema.value || undefined,
+      table: selectedTable.value,
+      column: original.name,
+      definition: {
+        name: props.structure.name,
+        schema: props.structure.schema,
+        primaryKeys: props.structure.primaryKeys
+      }
+    };
+  }
+
+  if (draft.name !== original.name) {
+    return {
+      action: "renameColumn",
+      schema: selectedSchema.value || undefined,
+      table: selectedTable.value,
+      column: original.name,
+      nextColumn: draft.name,
+      definition: {
+        name: props.structure.name,
+        schema: props.structure.schema,
+        primaryKeys: props.structure.primaryKeys
+      }
+    };
+  }
+
+  if (props.connection.type === "sqlite") {
+    return null;
+  }
+
+  if (props.connection.type === "postgresql" && !structureCellChanged(firstChangedStructureIndex.value, "dataType")) {
+    return null;
+  }
+
+  return {
+    action: "editColumn",
+    schema: selectedSchema.value || undefined,
+    table: selectedTable.value,
+    column: original.name,
+    nextColumn: draft.name !== original.name ? draft.name : undefined,
+    definition: {
+      name: props.structure.name,
+      schema: props.structure.schema,
+      primaryKeys: props.structure.primaryKeys,
+      columns: [
+        {
+          name: draft.name,
+          dataType: draft.dataType,
+          nullable: draft.nullable,
+          defaultValue: normalizedStructureDefaultValue(draft.defaultValue),
+          primaryKey: draft.primaryKey,
+          unique: draft.unique,
+          autoIncrement: draft.autoIncrement
+        }
+      ]
+    }
+  };
+}
+
+function emitStructurePreview(): void {
+  const payload = buildStructureChangePayload();
+  if (!payload) {
+    return;
+  }
+
+  emit("preview", payload);
+}
+
+function emitStructureApply(): void {
+  const payload = buildStructureChangePayload();
+  if (!payload) {
+    return;
+  }
+
+  emit("apply", payload);
+}
+
+function stageStructureColumn(): void {
+  structureDrafts.value = [
+    ...structureDrafts.value,
+    cloneColumnSchema(
+      {
+        name: "",
+        dataType: "TEXT",
+        nullable: true,
+        defaultValue: "",
+        primaryKey: false,
+        unique: false,
+        autoIncrement: false
+      },
+      `new-column-${Date.now()}`,
+      true
+    )
+  ];
+}
+
+function removeStructureDraft(index: number): void {
+  const draft = structureDrafts.value[index];
+  if (!draft?.isNew) {
+    return;
+  }
+
+  structureDrafts.value = structureDrafts.value.filter((_, currentIndex) => currentIndex !== index);
+}
+
+function canDeleteStructureColumn(index: number): boolean {
+  const draft = structureDrafts.value[index];
+  if (!draft || draft.isNew) {
+    return false;
+  }
+
+  return !draft.primaryKey && !draft.autoIncrement;
+}
+
+function toggleStructureDelete(index: number): void {
+  const draft = structureDrafts.value[index];
+  if (!draft || !canDeleteStructureColumn(index)) {
+    return;
+  }
+
+  const next = [...structureDrafts.value];
+  next[index] = {
+    ...draft,
+    isDeleted: !draft.isDeleted
+  };
+  structureDrafts.value = next;
+}
+
+function isStructureFieldEditable(index: number, key: keyof ColumnSchema): boolean {
+  const draft = structureDrafts.value[index];
+  if (!draft) {
+    return false;
+  }
+
+  if (draft.isDeleted) {
+    return false;
+  }
+
+  if (draft.isNew) {
+    return true;
+  }
+
+  switch (props.connection.type) {
+    case "sqlite":
+      return key === "name";
+    case "postgresql":
+      return key === "name" || key === "dataType";
+    case "mysql":
+      return true;
+    default:
+      return false;
+  }
+}
+
+const structureCapabilityHint = computed(() => {
+  switch (props.connection.type) {
+    case "sqlite":
+      return "SQLite existing columns support rename only. Use Add Column for new fields.";
+    case "postgresql":
+      return "PostgreSQL existing columns support rename and type changes. Apply rename and type edits separately.";
+    case "mysql":
+      return "MySQL existing columns support rename and definition changes. If you change the name and other fields, apply the rename first.";
+    default:
+      return "Column editing support depends on the active database type.";
+  }
+});
 </script>
 
 <template>
@@ -952,22 +1298,33 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
             <div class="actions">
               <button
                 class="secondary icon-button"
-                title="Preview Add Column"
-                aria-label="Preview Add Column"
-                @click="emit('preview', { action: 'addColumn', schema: selectedSchema || undefined, table: selectedTable, column: 'new_column', definition: { columns: [{ name: 'new_column', dataType: 'TEXT', nullable: true, primaryKey: false, unique: false, autoIncrement: false }] } })"
+                title="Add Column"
+                aria-label="Add Column"
+                @click="stageStructureColumn"
+              >
+                <MdiIcon :path="mdiPlusCircleOutline" />
+              </button>
+              <button
+                class="secondary icon-button"
+                title="Preview Column Change"
+                aria-label="Preview Column Change"
+                :disabled="firstChangedStructureIndex < 0"
+                @click="emitStructurePreview"
               >
                 <MdiIcon :path="mdiMagnify" />
               </button>
               <button
                 class="icon-button"
-                title="Apply Add Column"
-                aria-label="Apply Add Column"
-                @click="emit('apply', { action: 'addColumn', schema: selectedSchema || undefined, table: selectedTable, column: 'new_column', definition: { columns: [{ name: 'new_column', dataType: 'TEXT', nullable: true, primaryKey: false, unique: false, autoIncrement: false }] } })"
+                title="Apply Column Change"
+                aria-label="Apply Column Change"
+                :disabled="firstChangedStructureIndex < 0"
+                @click="emitStructureApply"
               >
                 <MdiIcon :path="mdiCheckCircleOutline" />
               </button>
             </div>
           </div>
+          <p class="empty-state">{{ structureCapabilityHint }}</p>
           <table v-if="structure">
             <thead>
               <tr>
@@ -976,15 +1333,109 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 <th>Nullable</th>
                 <th>Default</th>
                 <th>PK</th>
+                <th>Unique</th>
+                <th>Auto Increment</th>
+                <th v-if="hasStructureRowActions">Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="column in structure.columns" :key="column.name">
-                <td>{{ column.name }}</td>
-                <td>{{ column.dataType }}</td>
-                <td>{{ column.nullable ? "YES" : "NO" }}</td>
-                <td>{{ column.defaultValue ?? "" }}</td>
-                <td>{{ column.primaryKey ? "YES" : "NO" }}</td>
+              <tr v-for="(column, index) in structureDrafts" :key="column.draftId">
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'name'), 'pending-updated-cell': structureCellChanged(index, 'name'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="text"
+                    :value="column.name"
+                    :disabled="!isStructureFieldEditable(index, 'name')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'name'), 'readonly-input': !isStructureFieldEditable(index, 'name'), 'deleted-input': column.isDeleted }"
+                    @input="isStructureFieldEditable(index, 'name') && updateStructureDraft(index, 'name', ($event.target as HTMLInputElement).value)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'dataType'), 'pending-updated-cell': structureCellChanged(index, 'dataType'), 'deleted-cell': column.isDeleted }">
+                  <select
+                    v-if="column.isNew"
+                    :value="column.dataType"
+                    :disabled="!isStructureFieldEditable(index, 'dataType')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'dataType'), 'readonly-input': !isStructureFieldEditable(index, 'dataType') }"
+                    @change="isStructureFieldEditable(index, 'dataType') && updateStructureDraft(index, 'dataType', ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option v-for="typeOption in structureTypeOptions" :key="typeOption" :value="typeOption">
+                      {{ typeOption }}
+                    </option>
+                  </select>
+                  <input
+                    v-else
+                    type="text"
+                    :value="column.dataType"
+                    :disabled="!isStructureFieldEditable(index, 'dataType')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'dataType'), 'readonly-input': !isStructureFieldEditable(index, 'dataType'), 'deleted-input': column.isDeleted }"
+                    @input="isStructureFieldEditable(index, 'dataType') && updateStructureDraft(index, 'dataType', ($event.target as HTMLInputElement).value)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'nullable'), 'pending-updated-cell': structureCellChanged(index, 'nullable'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="checkbox"
+                    :checked="column.nullable"
+                    :disabled="!isStructureFieldEditable(index, 'nullable')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'nullable'), 'readonly-input': !isStructureFieldEditable(index, 'nullable') }"
+                    @change="isStructureFieldEditable(index, 'nullable') && updateStructureDraft(index, 'nullable', ($event.target as HTMLInputElement).checked)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'defaultValue'), 'pending-updated-cell': structureCellChanged(index, 'defaultValue'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="text"
+                    :value="String(column.defaultValue ?? '')"
+                    :disabled="!isStructureFieldEditable(index, 'defaultValue')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'defaultValue'), 'readonly-input': !isStructureFieldEditable(index, 'defaultValue'), 'deleted-input': column.isDeleted }"
+                    @input="isStructureFieldEditable(index, 'defaultValue') && updateStructureDraft(index, 'defaultValue', ($event.target as HTMLInputElement).value)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'primaryKey'), 'pending-updated-cell': structureCellChanged(index, 'primaryKey'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="checkbox"
+                    :checked="column.primaryKey"
+                    :disabled="!isStructureFieldEditable(index, 'primaryKey')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'primaryKey'), 'readonly-input': !isStructureFieldEditable(index, 'primaryKey') }"
+                    @change="isStructureFieldEditable(index, 'primaryKey') && updateStructureDraft(index, 'primaryKey', ($event.target as HTMLInputElement).checked)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'unique'), 'pending-updated-cell': structureCellChanged(index, 'unique'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="checkbox"
+                    :checked="column.unique"
+                    :disabled="!isStructureFieldEditable(index, 'unique')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'unique'), 'readonly-input': !isStructureFieldEditable(index, 'unique') }"
+                    @change="isStructureFieldEditable(index, 'unique') && updateStructureDraft(index, 'unique', ($event.target as HTMLInputElement).checked)"
+                  />
+                </td>
+                <td :class="{ 'changed-cell': structureCellChanged(index, 'autoIncrement'), 'pending-updated-cell': structureCellChanged(index, 'autoIncrement'), 'deleted-cell': column.isDeleted }">
+                  <input
+                    type="checkbox"
+                    :checked="column.autoIncrement"
+                    :disabled="!isStructureFieldEditable(index, 'autoIncrement')"
+                    :class="{ 'changed-input': structureCellChanged(index, 'autoIncrement'), 'readonly-input': !isStructureFieldEditable(index, 'autoIncrement') }"
+                    @change="isStructureFieldEditable(index, 'autoIncrement') && updateStructureDraft(index, 'autoIncrement', ($event.target as HTMLInputElement).checked)"
+                  />
+                </td>
+                <td v-if="hasStructureRowActions" class="row-actions">
+                  <button
+                    v-if="column.isNew"
+                    class="danger icon-button"
+                    title="Remove New Column"
+                    aria-label="Remove New Column"
+                    @click="removeStructureDraft(index)"
+                  >
+                    <MdiIcon :path="mdiDeleteOutline" />
+                  </button>
+                  <button
+                    v-else
+                    class="danger icon-button"
+                    :title="canDeleteStructureColumn(index) ? (column.isDeleted ? 'Undo Delete Column' : 'Delete Column') : 'This column cannot be deleted'"
+                    :aria-label="canDeleteStructureColumn(index) ? (column.isDeleted ? 'Undo Delete Column' : 'Delete Column') : 'This column cannot be deleted'"
+                    :disabled="!canDeleteStructureColumn(index)"
+                    @click="canDeleteStructureColumn(index) && toggleStructureDelete(index)"
+                  >
+                    <MdiIcon :path="column.isDeleted ? mdiRestore : mdiDeleteOutline" />
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>

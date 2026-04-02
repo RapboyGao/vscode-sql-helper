@@ -33,6 +33,7 @@ const isError = ref(false);
 const applySignal = ref(0);
 const connectionBusyAction = ref<"save" | "test" | null>(null);
 const connectionStatusText = ref("Ready");
+const pendingSchemaAction = ref<string | null>(null);
 let connectionBusyTimer: number | undefined;
 
 function post(payload: WebviewToExtensionMessage): void {
@@ -101,6 +102,20 @@ function requestConnectionFilePick(): void {
   });
 }
 
+function requestSchemaApply(payload: {
+  action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn";
+  schema?: string;
+  table: string;
+  nextTable?: string;
+  column?: string;
+  nextColumn?: string;
+  definition?: Partial<TableSchema>;
+}): void {
+  pendingSchemaAction.value = payload.action;
+  showNotice(`Applying ${payload.action}...`);
+  post({ type: "schema/apply", payload });
+}
+
 onMounted(() => {
   window.addEventListener("message", (event) => {
     const next = event.data as ExtensionToWebviewMessage;
@@ -145,6 +160,10 @@ onMounted(() => {
         result.value = next.payload.result;
         structure.value = next.payload.structure;
         logs.value = next.payload.logs;
+        if (pendingSchemaAction.value) {
+          showNotice(`${pendingSchemaAction.value} applied`);
+          pendingSchemaAction.value = null;
+        }
         break;
       case "tableData/result":
         query.value = next.payload.query;
@@ -165,6 +184,7 @@ onMounted(() => {
         break;
       case "ui/error":
         clearConnectionBusy();
+        pendingSchemaAction.value = null;
         showNotice(next.payload.message, true);
         break;
     }
@@ -208,7 +228,7 @@ onMounted(() => {
       @query="post({ type: 'tableData/query', payload: $event })"
       @applyChanges="post({ type: 'tableData/applyChanges', payload: $event })"
       @preview="post({ type: 'schema/preview', payload: $event })"
-      @apply="post({ type: 'schema/apply', payload: $event })"
+      @apply="requestSchemaApply($event)"
     />
 
     <section v-else class="empty-state empty-root">
