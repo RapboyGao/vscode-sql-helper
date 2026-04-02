@@ -64,7 +64,6 @@ export class NativeBridge {
   }
 
   private async executeRequest<TData>(request: NativeRequest<unknown>): Promise<NativeResponse<TData>> {
-
     const executable = resolveNativeBinaryPath(this.context.extensionUri);
 
     return await new Promise<NativeResponse<TData>>((resolve, reject) => {
@@ -74,6 +73,17 @@ export class NativeBridge {
 
       let stdout = "";
       let stderr = "";
+      const timeout = setTimeout(() => {
+        child.kill();
+        resolve({
+          requestId: request.requestId,
+          success: false,
+          error: {
+            code: "TIMEOUT",
+            message: stderr.trim() || `Native ${request.operation} timed out`
+          }
+        });
+      }, 10000);
 
       child.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -83,14 +93,37 @@ export class NativeBridge {
         stderr += chunk.toString();
       });
 
-      child.on("error", reject);
+      child.on("error", (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
       child.on("close", () => {
+        clearTimeout(timeout);
         if (!stdout.trim()) {
-          reject(new Error(stderr || "Native process returned no output"));
+          resolve({
+            requestId: request.requestId,
+            success: false,
+            error: {
+              code: "UNKNOWN",
+              message: stderr.trim() || "Native process returned no output"
+            }
+          });
           return;
         }
 
-        resolve(JSON.parse(stdout) as NativeResponse<TData>);
+        try {
+          resolve(JSON.parse(stdout) as NativeResponse<TData>);
+        } catch (error) {
+          resolve({
+            requestId: request.requestId,
+            success: false,
+            error: {
+              code: "UNKNOWN",
+              message: error instanceof Error ? error.message : "Failed to parse native response",
+              details: stdout.trim()
+            }
+          });
+        }
       });
 
       child.stdin.write(JSON.stringify(request));

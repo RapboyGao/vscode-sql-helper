@@ -4,7 +4,6 @@ mod models;
 use anyhow::{anyhow, Result};
 use models::{NativeRequest, NativeResponse};
 use serde_json::{json, Value};
-use sqlx::Executor;
 use std::io::{self, Read};
 
 #[tokio::main]
@@ -95,7 +94,7 @@ async fn handle_sqlite(request: &NativeRequest) -> Result<NativeResponse> {
             let ddl_payload = ddl::parse_payload(request.payload.clone())?;
             let preview = ddl::build_preview(&request.connection, &ddl_payload)?;
             for statement in preview.statements.iter() {
-                pool.execute(statement.as_str()).await?;
+                sqlx::query(statement).execute(&pool).await?;
             }
             NativeResponse::success_with_preview(request.request_id.clone(), Some(json!({ "applied": true })), preview)
         }

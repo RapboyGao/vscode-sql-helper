@@ -282,8 +282,22 @@ export class TableDataPanel {
             operation: message.payload.action,
             success: true
           });
+          await this.panel.webview.postMessage({
+            type: "schema/applied",
+            payload: {
+              action: message.payload.action,
+              table: message.payload.table
+            }
+          } satisfies ExtensionToWebviewMessage);
           this.refreshExplorer();
-          await this.postBootstrap();
+          try {
+            await this.postBootstrap();
+          } catch (error) {
+            await this.panel.webview.postMessage({
+              type: "ui/error",
+              payload: { code: "UNKNOWN", message: toUserMessage(error) }
+            } satisfies ExtensionToWebviewMessage);
+          }
         }
         return;
       } catch (error) {

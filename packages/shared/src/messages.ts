@@ -82,6 +82,13 @@ export type ExtensionToWebviewMessage =
       payload: SqlPreview;
     }
   | {
+      type: "schema/applied";
+      payload: {
+        action: "createTable" | "renameTable" | "deleteTable" | "addColumn" | "editColumn" | "deleteColumn" | "renameColumn";
+        table: string;
+      };
+    }
+  | {
       type: "logs/result";
       payload: {
         logs: OperationLogEntry[];

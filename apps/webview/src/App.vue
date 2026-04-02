@@ -35,6 +35,7 @@ const connectionBusyAction = ref<"save" | "test" | null>(null);
 const connectionStatusText = ref("Ready");
 const pendingSchemaAction = ref<string | null>(null);
 let connectionBusyTimer: number | undefined;
+let schemaBusyTimer: number | undefined;
 
 function post(payload: WebviewToExtensionMessage): void {
   vscode?.postMessage(payload);
@@ -56,6 +57,14 @@ function clearConnectionBusy(): void {
   if (connectionBusyTimer !== undefined) {
     window.clearTimeout(connectionBusyTimer);
     connectionBusyTimer = undefined;
+  }
+}
+
+function clearSchemaBusy(): void {
+  pendingSchemaAction.value = null;
+  if (schemaBusyTimer !== undefined) {
+    window.clearTimeout(schemaBusyTimer);
+    schemaBusyTimer = undefined;
   }
 }
 
@@ -111,8 +120,17 @@ function requestSchemaApply(payload: {
   nextColumn?: string;
   definition?: Partial<TableSchema>;
 }): void {
+  clearSchemaBusy();
   pendingSchemaAction.value = payload.action;
   showNotice(`Applying ${payload.action}...`);
+  schemaBusyTimer = window.setTimeout(() => {
+    if (pendingSchemaAction.value !== payload.action) {
+      return;
+    }
+
+    clearSchemaBusy();
+    showNotice(`${payload.action} did not finish. Please try again.`, true);
+  }, 8000);
   post({ type: "schema/apply", payload });
 }
 
@@ -161,8 +179,9 @@ onMounted(() => {
         structure.value = next.payload.structure;
         logs.value = next.payload.logs;
         if (pendingSchemaAction.value) {
-          showNotice(`${pendingSchemaAction.value} applied`);
-          pendingSchemaAction.value = null;
+          const action = pendingSchemaAction.value;
+          clearSchemaBusy();
+          showNotice(`${action} applied`);
         }
         break;
       case "tableData/result":
@@ -179,12 +198,18 @@ onMounted(() => {
       case "schema/sqlPreview":
         sqlPreview.value = next.payload;
         break;
+      case "schema/applied": {
+        const action = next.payload.action;
+        clearSchemaBusy();
+        showNotice(`${action} applied on ${next.payload.table}`);
+        break;
+      }
       case "logs/result":
         logs.value = next.payload.logs;
         break;
       case "ui/error":
         clearConnectionBusy();
-        pendingSchemaAction.value = null;
+        clearSchemaBusy();
         showNotice(next.payload.message, true);
         break;
     }

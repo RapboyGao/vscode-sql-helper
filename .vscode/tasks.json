@@ -4,7 +4,7 @@
     {
       "label": "build-workspace",
       "type": "shell",
-      "command": "pnpm build:shared && pnpm build:webview && pnpm build:extension",
+      "command": "pnpm build:shared && pnpm build:webview && pnpm build:extension && pnpm build:native",
       "group": {
         "kind": "build",
         "isDefault": true
@@ -29,4 +29,3 @@
     }
   ]
 }
-
