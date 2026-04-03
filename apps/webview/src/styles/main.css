@@ -676,7 +676,8 @@ button:disabled {
 }
 
 .changed-cell {
-  background: color-mix(in srgb, var(--ui-selection) 28%, transparent);
+  background: color-mix(in srgb, var(--ui-success) 18%, var(--ui-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-success) 40%, transparent);
 }
 
 .pending-updated-cell {
@@ -685,9 +686,9 @@ button:disabled {
 }
 
 .changed-input {
-  border-color: color-mix(in srgb, var(--ui-success) 80%, var(--ui-input-border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ui-success) 55%, transparent);
-  background: color-mix(in srgb, var(--ui-success) 12%, var(--ui-input-bg));
+  border-color: var(--ui-input-border);
+  box-shadow: none;
+  background: transparent;
 }
 
 .readonly-input {
@@ -711,7 +712,7 @@ button:disabled {
 .text-link-button {
   display: block;
   width: 100%;
-  padding: 0;
+  padding: 6px 0;
   border: 0;
   background: transparent;
   color: var(--ui-link);
@@ -737,6 +738,19 @@ button:disabled {
 
 .deleted-cell {
   background: color-mix(in srgb, var(--ui-danger) 14%, transparent);
+}
+
+.changed-cell .text-link-button,
+.changed-cell .datetime-trigger {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.changed-cell input,
+.changed-cell select,
+.changed-cell textarea {
+  background: transparent;
 }
 
 .pending-delete-row td input {

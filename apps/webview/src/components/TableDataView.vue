@@ -478,7 +478,7 @@ function resetTableCreateDraft(): void {
 }
 
 function createEmptyTableColumnDraft(): TableCreateColumnDraft {
-  return {
+  return normalizeCreateTableColumnDraft({
     id: createDraftId("table-column"),
     name: "",
     dataType: tableTypeOptions.value[0] ?? "TEXT",
@@ -487,7 +487,7 @@ function createEmptyTableColumnDraft(): TableCreateColumnDraft {
     primaryKey: false,
     unique: false,
     autoIncrement: false
-  };
+  });
 }
 
 function openTableModal(mode: TableActionModal): void {
@@ -514,6 +514,60 @@ function removeCreateTableColumn(id: string): void {
     return;
   }
   createTableColumns.value = createTableColumns.value.filter((column) => column.id !== id);
+}
+
+function isIntegerLikeDataType(type: string, dbType: SavedConnection["type"]): boolean {
+  const normalized = type.trim().toLowerCase();
+
+  switch (dbType) {
+    case "sqlite":
+      return normalized === "integer";
+    case "mysql":
+      return /(^|[^a-z])(tinyint|smallint|mediumint|int|integer|bigint)([^a-z]|$)/.test(normalized);
+    case "postgresql":
+      return /(^|[^a-z])(smallint|integer|bigint|serial|bigserial)([^a-z]|$)/.test(normalized);
+    default:
+      return /(int|integer|bigint)/.test(normalized);
+  }
+}
+
+function createColumnSupportsAutoIncrement(column: TableCreateColumnDraft): boolean {
+  return isIntegerLikeDataType(column.dataType, props.connection.type);
+}
+
+function createColumnSupportsDefault(column: TableCreateColumnDraft): boolean {
+  return !column.autoIncrement;
+}
+
+function normalizeCreateTableColumnDraft(column: TableCreateColumnDraft): TableCreateColumnDraft {
+  const normalized: TableCreateColumnDraft = { ...column };
+
+  if (!createColumnSupportsAutoIncrement(normalized)) {
+    normalized.autoIncrement = false;
+  }
+
+  if (normalized.autoIncrement) {
+    normalized.primaryKey = true;
+    normalized.nullable = false;
+    normalized.unique = false;
+    normalized.defaultValue = "";
+  }
+
+  if (normalized.primaryKey) {
+    normalized.nullable = false;
+  }
+
+  if (!createColumnSupportsDefault(normalized)) {
+    normalized.defaultValue = "";
+  }
+
+  return normalized;
+}
+
+function updateCreateTableColumn(id: string, patch: Partial<TableCreateColumnDraft>): void {
+  createTableColumns.value = createTableColumns.value.map((column) =>
+    column.id === id ? normalizeCreateTableColumnDraft({ ...column, ...patch }) : column
+  );
 }
 
 function toColumnSchemaDraft(column: TableCreateColumnDraft): ColumnSchema {
@@ -1625,15 +1679,51 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               </button>
             </div>
             <div class="modal-grid" v-for="column in createTableColumns" :key="column.id">
-              <input v-model="column.name" placeholder="Column name" />
-              <select v-model="column.dataType">
+              <input :value="column.name" placeholder="Column name" @input="updateCreateTableColumn(column.id, { name: ($event.target as HTMLInputElement).value })" />
+              <select :value="column.dataType" @change="updateCreateTableColumn(column.id, { dataType: ($event.target as HTMLSelectElement).value })">
                 <option v-for="option in tableTypeOptions" :key="option" :value="option">{{ option }}</option>
               </select>
-              <input v-model="column.defaultValue" placeholder="Default value" />
-              <label class="inline-check"><input type="checkbox" v-model="column.nullable" /> Nullable</label>
-              <label class="inline-check"><input type="checkbox" v-model="column.primaryKey" /> PK</label>
-              <label class="inline-check"><input type="checkbox" v-model="column.unique" /> Unique</label>
-              <label class="inline-check"><input type="checkbox" v-model="column.autoIncrement" /> Auto</label>
+              <input
+                :value="column.defaultValue"
+                placeholder="Default value"
+                :disabled="!createColumnSupportsDefault(column)"
+                @input="updateCreateTableColumn(column.id, { defaultValue: ($event.target as HTMLInputElement).value })"
+              />
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  :checked="column.nullable"
+                  :disabled="column.primaryKey || column.autoIncrement"
+                  @change="updateCreateTableColumn(column.id, { nullable: ($event.target as HTMLInputElement).checked })"
+                />
+                Nullable
+              </label>
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  :checked="column.primaryKey"
+                  @change="updateCreateTableColumn(column.id, { primaryKey: ($event.target as HTMLInputElement).checked })"
+                />
+                PK
+              </label>
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  :checked="column.unique"
+                  :disabled="column.autoIncrement"
+                  @change="updateCreateTableColumn(column.id, { unique: ($event.target as HTMLInputElement).checked })"
+                />
+                Unique
+              </label>
+              <label class="inline-check">
+                <input
+                  type="checkbox"
+                  :checked="column.autoIncrement"
+                  :disabled="!createColumnSupportsAutoIncrement(column)"
+                  @change="updateCreateTableColumn(column.id, { autoIncrement: ($event.target as HTMLInputElement).checked })"
+                />
+                Auto
+              </label>
               <button class="danger icon-button" type="button" :disabled="createTableColumns.length <= 1" @click="removeCreateTableColumn(column.id)">
                 <MdiIcon :path="mdiDeleteOutline" />
               </button>
