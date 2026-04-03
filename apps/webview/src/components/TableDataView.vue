@@ -1254,7 +1254,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       :model-value="String(cellDisplayValue(entry.row, column.name))"
                       :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
                       placeholder="Set datetime"
-                      @update:model-value="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
+                      @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
                     />
                     <input
                       v-else-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
@@ -1434,7 +1434,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 :model-value="String(insertDraft[column.name] ?? '')"
                 :disabled="!isEditableColumn(column.name)"
                 placeholder="Set datetime"
-                @update:model-value="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
+                @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
               />
                     <input
                       v-else-if="columnInputKind(column.name) === 'checkbox'"
