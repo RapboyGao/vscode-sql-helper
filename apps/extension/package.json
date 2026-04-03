@@ -20,7 +20,7 @@
     "onCustomEditor:databaseManager.sqliteEditor"
   ],
   "main": "./dist/extension.js",
-  "icon": "resources/database-manager.svg",
+  "icon": "resources/database-manager.png",
   "contributes": {
     "commands": [
       { "command": "extension.addConnection", "title": "Database Manager: Add Connection" },
@@ -105,7 +105,7 @@
     "watch": "node ./scripts/build.mjs --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm typecheck",
-    "package:vsix": "npx @vscode/vsce package"
+    "package:vsix": "npx @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
     "@usd/shared": "workspace:*"

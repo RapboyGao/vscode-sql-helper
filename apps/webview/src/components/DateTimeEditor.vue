@@ -13,6 +13,7 @@ const props = defineProps<{
   modelValue: string;
   disabled?: boolean;
   placeholder?: string;
+  onCommit?: (value: string) => void;
 }>();
 
 const emit = defineEmits<{
@@ -62,6 +63,7 @@ function clampSegment(value: string, max: number, pad: number): string {
 function apply(): void {
   if (!draft.value.date) {
     emit("update:modelValue", "");
+    props.onCommit?.("");
     open.value = false;
     return;
   }
@@ -79,6 +81,7 @@ function apply(): void {
   ].join("");
 
   emit("update:modelValue", nextValue);
+  props.onCommit?.(nextValue);
   open.value = false;
 }
 
@@ -91,6 +94,7 @@ function clear(): void {
     millisecond: ""
   };
   emit("update:modelValue", "");
+  props.onCommit?.("");
   open.value = false;
 }
 </script>

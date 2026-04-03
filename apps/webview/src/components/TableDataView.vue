@@ -207,7 +207,7 @@ const pendingUpdates = computed<PendingTableUpdate[]>(() => {
     }
 
     const changedValues = Object.fromEntries(
-      Object.entries(draft).filter(([column, value]) => String(row[column] ?? "") !== value)
+      Object.entries(draft).filter(([column, value]) => normalizeCellValue(column, row[column]) !== normalizeCellValue(column, value))
     );
 
     if (!Object.keys(changedValues).length) {
@@ -1252,6 +1252,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                     <DateTimeEditor
                       v-if="columnInputKind(column.name) === 'datetime-local'"
                       :model-value="String(cellDisplayValue(entry.row, column.name))"
+                      :on-commit="(value) => entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, value)"
                       :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
                       placeholder="Set datetime"
                       @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
@@ -1432,6 +1433,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               <DateTimeEditor
                 v-else-if="columnInputKind(column.name) === 'datetime-local'"
                 :model-value="String(insertDraft[column.name] ?? '')"
+                :on-commit="(value) => isEditableColumn(column.name) && setInsertDraftValue(column.name, value)"
                 :disabled="!isEditableColumn(column.name)"
                 placeholder="Set datetime"
                 @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
