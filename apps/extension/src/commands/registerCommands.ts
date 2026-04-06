@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { l10n } from "../l10n/index.js";
 import { createEmptyConnectionForm, type DatabaseType } from "@usd/shared";
 import { ConnectionStore } from "../storage/connectionStore.js";
 import { DatabaseExplorerProvider } from "../explorer/databaseExplorerProvider.js";
@@ -20,12 +21,12 @@ export function registerCommands(
     vscode.commands.registerCommand("extension.addConnection", async () => {
       const typePick = await vscode.window.showQuickPick<{ label: string; value: DatabaseType }>(
         [
-          { label: "MySQL", value: "mysql" },
-          { label: "PostgreSQL", value: "postgresql" },
-          { label: "SQLite", value: "sqlite" }
+          { label: l10n.t("databaseType.mysql", "MySQL"), value: "mysql" },
+          { label: l10n.t("databaseType.postgresql", "PostgreSQL"), value: "postgresql" },
+          { label: l10n.t("databaseType.sqlite", "SQLite"), value: "sqlite" }
         ],
         {
-        placeHolder: "Select database type"
+        placeHolder: l10n.t("selectDatabaseType", "Select database type")
         }
       );
       const type = typePick?.value;
@@ -36,7 +37,7 @@ export function registerCommands(
       const form = createEmptyConnectionForm(type);
       const saved = await connectionStore.upsert({
         ...form,
-        name: type === "sqlite" ? "New SQLite Connection" : `New ${type} Connection`
+        name: type === "sqlite" ? l10n.t("New SQLite Connection") : l10n.t(`New ${type} Connection`)
       });
       await connectionPanel.open(saved.id);
       explorer.refresh();
@@ -53,8 +54,8 @@ export function registerCommands(
       if (!connectionId) {
         return;
       }
-      const confirmed = await vscode.window.showWarningMessage("Remove this saved connection?", { modal: true }, "Remove");
-      if (confirmed !== "Remove") {
+      const confirmed = await vscode.window.showWarningMessage(l10n.t("removeConnectionWarning", "Remove this saved connection?"), { modal: true }, l10n.t("removeButton", "Remove"));
+      if (confirmed !== l10n.t("removeButton", "Remove")) {
         return;
       }
       await connectionStore.delete(connectionId);
@@ -70,9 +71,9 @@ export function registerCommands(
       }
       const response = await nativeBridge.call(connection, "testConnection", {});
       if (response.success) {
-        void vscode.window.showInformationMessage("Connection successful");
+        void vscode.window.showInformationMessage(l10n.t("connectionSuccessful", "Connection successful"));
       } else {
-        void vscode.window.showErrorMessage(response.error?.message ?? "Connection failed");
+        void vscode.window.showErrorMessage(response.error?.message ?? l10n.t("connectionFailed", "Connection failed"));
       }
     }),
     vscode.commands.registerCommand("extension.refreshExplorer", () => explorer.refresh()),

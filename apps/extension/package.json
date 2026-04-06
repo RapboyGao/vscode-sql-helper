@@ -27,31 +27,31 @@
   "icon": "resources/database-manager.png",
   "contributes": {
     "commands": [
-      { "command": "extension.addConnection", "title": "Database Manager: Add Connection" },
-      { "command": "extension.editConnection", "title": "Database Manager: Edit Connection" },
-      { "command": "extension.removeConnection", "title": "Database Manager: Remove Connection" },
-      { "command": "extension.testConnection", "title": "Database Manager: Test Connection" },
-      { "command": "extension.refreshExplorer", "title": "Database Manager: Refresh Explorer" },
-      { "command": "extension.openConnectionDetails", "title": "Database Manager: Open Connection Details" },
-      { "command": "extension.openTableData", "title": "Database Manager: Open Table Data" },
-      { "command": "extension.insertRow", "title": "Database Manager: Insert Row" },
-      { "command": "extension.updateRow", "title": "Database Manager: Update Row" },
-      { "command": "extension.deleteRow", "title": "Database Manager: Delete Row" },
-      { "command": "extension.createTable", "title": "Database Manager: Create Table" },
-      { "command": "extension.deleteTable", "title": "Database Manager: Delete Table" },
-      { "command": "extension.renameTable", "title": "Database Manager: Rename Table" },
-      { "command": "extension.addColumn", "title": "Database Manager: Add Column" },
-      { "command": "extension.editColumn", "title": "Database Manager: Edit Column" },
-      { "command": "extension.deleteColumn", "title": "Database Manager: Delete Column" },
-      { "command": "extension.renameColumn", "title": "Database Manager: Rename Column" },
-      { "command": "extension.openSQLiteFile", "title": "Database Manager: Open SQLite File" },
-      { "command": "extension.addSQLiteFileAsConnection", "title": "Database Manager: Add SQLite File As Connection" }
+      { "command": "extension.addConnection", "title": "%command.addConnection%" },
+      { "command": "extension.editConnection", "title": "%command.editConnection%" },
+      { "command": "extension.removeConnection", "title": "%command.removeConnection%" },
+      { "command": "extension.testConnection", "title": "%command.testConnection%" },
+      { "command": "extension.refreshExplorer", "title": "%command.refreshExplorer%" },
+      { "command": "extension.openConnectionDetails", "title": "%command.openConnectionDetails%" },
+      { "command": "extension.openTableData", "title": "%command.openTableData%" },
+      { "command": "extension.insertRow", "title": "%command.insertRow%" },
+      { "command": "extension.updateRow", "title": "%command.updateRow%" },
+      { "command": "extension.deleteRow", "title": "%command.deleteRow%" },
+      { "command": "extension.createTable", "title": "%command.createTable%" },
+      { "command": "extension.deleteTable", "title": "%command.deleteTable%" },
+      { "command": "extension.renameTable", "title": "%command.renameTable%" },
+      { "command": "extension.addColumn", "title": "%command.addColumn%" },
+      { "command": "extension.editColumn", "title": "%command.editColumn%" },
+      { "command": "extension.deleteColumn", "title": "%command.deleteColumn%" },
+      { "command": "extension.renameColumn", "title": "%command.renameColumn%" },
+      { "command": "extension.openSQLiteFile", "title": "%command.openSQLiteFile%" },
+      { "command": "extension.addSQLiteFileAsConnection", "title": "%command.addSQLiteFileAsConnection%" }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "databaseManager",
-          "title": "Database Manager",
+          "title": "%view.databaseManager%",
           "icon": "resources/database-manager.svg"
         }
       ]
@@ -60,14 +60,14 @@
       "databaseManager": [
         {
           "id": "databaseManager.savedConnections",
-          "name": "Saved Connections"
+          "name": "%view.savedConnections%"
         }
       ]
     },
     "customEditors": [
       {
         "viewType": "databaseManager.sqliteEditor",
-        "displayName": "Database Manager",
+        "displayName": "%view.databaseManager%",
         "selector": [
           { "filenamePattern": "*.sqlite" },
           { "filenamePattern": "*.sqlite3" },
@@ -102,7 +102,61 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "localizations": [
+      {
+        "languageId": "en",
+        "localizedStrings": {
+          "command.addConnection": "Database Manager: Add Connection",
+          "command.editConnection": "Database Manager: Edit Connection",
+          "command.removeConnection": "Database Manager: Remove Connection",
+          "command.testConnection": "Database Manager: Test Connection",
+          "command.refreshExplorer": "Database Manager: Refresh Explorer",
+          "command.openConnectionDetails": "Database Manager: Open Connection Details",
+          "command.openTableData": "Database Manager: Open Table Data",
+          "command.insertRow": "Database Manager: Insert Row",
+          "command.updateRow": "Database Manager: Update Row",
+          "command.deleteRow": "Database Manager: Delete Row",
+          "command.createTable": "Database Manager: Create Table",
+          "command.deleteTable": "Database Manager: Delete Table",
+          "command.renameTable": "Database Manager: Rename Table",
+          "command.addColumn": "Database Manager: Add Column",
+          "command.editColumn": "Database Manager: Edit Column",
+          "command.deleteColumn": "Database Manager: Delete Column",
+          "command.renameColumn": "Database Manager: Rename Column",
+          "command.openSQLiteFile": "Database Manager: Open SQLite File",
+          "command.addSQLiteFileAsConnection": "Database Manager: Add SQLite File As Connection",
+          "view.databaseManager": "Database Manager",
+          "view.savedConnections": "Saved Connections"
+        }
+      },
+      {
+        "languageId": "zh-cn",
+        "localizedStrings": {
+          "command.addConnection": "数据库管理器: 添加连接",
+          "command.editConnection": "数据库管理器: 编辑连接",
+          "command.removeConnection": "数据库管理器: 删除连接",
+          "command.testConnection": "数据库管理器: 测试连接",
+          "command.refreshExplorer": "数据库管理器: 刷新资源管理器",
+          "command.openConnectionDetails": "数据库管理器: 打开连接详情",
+          "command.openTableData": "数据库管理器: 打开表数据",
+          "command.insertRow": "数据库管理器: 插入行",
+          "command.updateRow": "数据库管理器: 更新行",
+          "command.deleteRow": "数据库管理器: 删除行",
+          "command.createTable": "数据库管理器: 创建表",
+          "command.deleteTable": "数据库管理器: 删除表",
+          "command.renameTable": "数据库管理器: 重命名表",
+          "command.addColumn": "数据库管理器: 添加列",
+          "command.editColumn": "数据库管理器: 编辑列",
+          "command.deleteColumn": "数据库管理器: 删除列",
+          "command.renameColumn": "数据库管理器: 重命名列",
+          "command.openSQLiteFile": "数据库管理器: 打开 SQLite 文件",
+          "command.addSQLiteFileAsConnection": "数据库管理器: 添加 SQLite 文件为连接",
+          "view.databaseManager": "数据库管理器",
+          "view.savedConnections": "已保存的连接"
+        }
+      }
+    ]
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",

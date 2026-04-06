@@ -1,0 +1,23 @@
+{
+  "command.addConnection": "数据库管理器: 添加连接",
+  "command.editConnection": "数据库管理器: 编辑连接",
+  "command.removeConnection": "数据库管理器: 删除连接",
+  "command.testConnection": "数据库管理器: 测试连接",
+  "command.refreshExplorer": "数据库管理器: 刷新资源管理器",
+  "command.openConnectionDetails": "数据库管理器: 打开连接详情",
+  "command.openTableData": "数据库管理器: 打开表数据",
+  "command.insertRow": "数据库管理器: 插入行",
+  "command.updateRow": "数据库管理器: 更新行",
+  "command.deleteRow": "数据库管理器: 删除行",
+  "command.createTable": "数据库管理器: 创建表",
+  "command.deleteTable": "数据库管理器: 删除表",
+  "command.renameTable": "数据库管理器: 重命名表",
+  "command.addColumn": "数据库管理器: 添加列",
+  "command.editColumn": "数据库管理器: 编辑列",
+  "command.deleteColumn": "数据库管理器: 删除列",
+  "command.renameColumn": "数据库管理器: 重命名列",
+  "command.openSQLiteFile": "数据库管理器: 打开 SQLite 文件",
+  "command.addSQLiteFileAsConnection": "数据库管理器: 添加 SQLite 文件为连接",
+  "view.databaseManager": "数据库管理器",
+  "view.savedConnections": "已保存的连接"
+}

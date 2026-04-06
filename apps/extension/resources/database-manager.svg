@@ -1,25 +1,29 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
-  <rect x="14" y="18" width="100" height="92" rx="24" stroke="currentColor" stroke-width="10"/>
+  <rect x="16" y="16" width="96" height="96" rx="22" stroke="currentColor" stroke-width="8"/>
   <path
-    d="M45 44C40.5817 44 37 47.5817 37 52C37 56.4183 40.5817 60 45 60H50C54.4183 60 58 63.5817 58 68C58 72.4183 54.4183 76 50 76H37"
+    d="M44 42H32V56H44C47.3137 56 50 58.6863 50 62C50 65.3137 47.3137 68 44 68H32V82H44C55.0457 82 64 73.0457 64 62C64 50.9543 55.0457 42 44 42Z"
     stroke="currentColor"
-    stroke-width="10"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <path d="M49 44H37" stroke="currentColor" stroke-width="10" stroke-linecap="round" />
-  <path
-    d="M71 44V68C71 72.4183 74.5817 76 79 76C83.4183 76 87 72.4183 87 68V44"
-    stroke="currentColor"
-    stroke-width="10"
+    stroke-width="8"
     stroke-linecap="round"
     stroke-linejoin="round"
   />
   <path
-    d="M95 44V76H111"
+    d="M78 42V68C78 75.732 84.268 82 92 82C99.732 82 106 75.732 106 68V42"
     stroke="currentColor"
-    stroke-width="10"
+    stroke-width="8"
     stroke-linecap="round"
     stroke-linejoin="round"
+  />
+  <path
+    d="M72 42V82"
+    stroke="currentColor"
+    stroke-width="8"
+    stroke-linecap="round"
+  />
+  <path
+    d="M72 82H96"
+    stroke="currentColor"
+    stroke-width="8"
+    stroke-linecap="round"
   />
 </svg>

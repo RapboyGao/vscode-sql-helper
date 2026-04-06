@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { l10n } from "../l10n/index.js";
 import type { SavedConnection } from "@usd/shared";
 import { ConnectionStore } from "../storage/connectionStore.js";
 import { DatabaseTreeNode } from "./explorerNodes.js";
@@ -22,12 +23,12 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
   public async getChildren(element?: DatabaseTreeNode): Promise<DatabaseTreeNode[]> {
     if (!element) {
       return [
-        this.createActionNode("actionAddConnection", "add-connection", "Add Connection", "extension.addConnection"),
-        this.createActionNode("actionOpenSqlite", "open-sqlite", "Open SQLite File", "extension.openSQLiteFile"),
+        this.createActionNode("actionAddConnection", "add-connection", l10n.t("addConnection", "Add Connection"), "extension.addConnection"),
+        this.createActionNode("actionOpenSqlite", "open-sqlite", l10n.t("openSqliteFile", "Open SQLite File"), "extension.openSQLiteFile"),
         new DatabaseTreeNode(
           "savedConnections",
           "saved-connections",
-          "Saved Connections",
+          l10n.t("savedConnections", "Saved Connections"),
           vscode.TreeItemCollapsibleState.Expanded
         )
       ];
@@ -57,7 +58,7 @@ export class DatabaseExplorerProvider implements vscode.TreeDataProvider<Databas
     };
     node.command = {
       command: "extension.openTableData",
-      title: "Open Database",
+      title: l10n.t("openDatabase", "Open Database"),
       arguments: [{ connection: { id: connection.id } }]
     };
     return node;
