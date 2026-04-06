@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { l10n } from "../l10n/index.js";
+import { localize } from "../l10n/index.js";
 import type { ExtensionToWebviewMessage, WebviewToExtensionMessage } from "@usd/shared";
 import { ConnectionStore } from "../storage/connectionStore.js";
 import { OperationLogStore } from "../storage/operationLogStore.js";
@@ -28,7 +28,7 @@ export class ConnectionDetailsPanel {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         ConnectionDetailsPanel.viewType,
-        l10n.t(`Connection: ${connection.name}`),
+        localize("connectionTitle", "Connection: {name}", { name: connection.name }),
         vscode.ViewColumn.Active,
         {
           enableScripts: true,
@@ -47,7 +47,7 @@ export class ConnectionDetailsPanel {
     }
 
     this.currentConnectionId = connection.id;
-    this.panel.title = l10n.t(`Connection: ${connection.name}`);
+    this.panel.title = localize("connectionTitle", "Connection: {name}", { name: connection.name });
     this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, connection.name, vscode.env.language);
     await this.postBootstrap(connection.id);
     this.panel.reveal(vscode.ViewColumn.Active);
@@ -81,16 +81,16 @@ export class ConnectionDetailsPanel {
         const savedConnection = await this.connectionStore.upsert(message.payload);
         const connection = this.connectionStore.get(savedConnection.id);
         if (!connection) {
-          throw new Error(l10n.t("Connection save could not be verified"));
+          throw new Error(localize("connectionSaveCouldNotBeVerified", "Connection save could not be verified"));
         }
 
         const form = await this.connectionStore.toForm(connection.id);
         if (form.readonly !== message.payload.readonly) {
-          throw new Error(l10n.t("Connection save did not persist the latest readonly setting"));
+          throw new Error(localize("connectionSaveDidNotPersistReadonly", "Connection save did not persist the latest readonly setting"));
         }
 
         this.currentConnectionId = connection.id;
-        this.panel.title = l10n.t(`Connection: ${connection.name}`);
+        this.panel.title = localize("connectionTitle", "Connection: {name}", { name: connection.name });
         await this.panel.webview.postMessage({
           type: "connection/saved",
           payload: {
@@ -119,7 +119,7 @@ export class ConnectionDetailsPanel {
           type: "connection/testResult",
           payload: {
             success: response.success,
-            message: response.success ? l10n.t("connectionSuccessful", "Connection successful") : response.error?.message ?? l10n.t("connectionFailed", "Connection failed")
+            message: response.success ? localize("connectionSuccessful", "Connection successful") : response.error?.message ?? localize("connectionFailed", "Connection failed")
           }
         } satisfies ExtensionToWebviewMessage);
         return;
@@ -158,7 +158,7 @@ export class ConnectionDetailsPanel {
         type: "ui/error",
         payload: {
           code: "UNKNOWN",
-          message: error instanceof Error ? error.message : l10n.t("Connection operation failed")
+          message: error instanceof Error ? error.message : localize("connectionOperationFailed", "Connection operation failed")
         }
       } satisfies ExtensionToWebviewMessage);
     }
