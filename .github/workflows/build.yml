@@ -89,6 +89,8 @@ jobs:
         run: pnpm build
       - name: Package VSIX
         run: pnpm package:vsix
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@v6
         with:
           name: extension-package
