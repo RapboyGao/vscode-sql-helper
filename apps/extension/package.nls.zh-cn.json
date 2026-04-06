@@ -19,5 +19,9 @@
   "command.openSQLiteFile": "数据库管理器: 打开 SQLite 文件",
   "command.addSQLiteFileAsConnection": "数据库管理器: 添加 SQLite 文件为连接",
   "view.databaseManager": "数据库管理器",
-  "view.savedConnections": "已保存的连接"
+  "view.savedConnections": "已保存的连接",
+  "addConnection": "添加连接",
+  "openSqliteFile": "打开 SQLite 文件",
+  "savedConnections": "已保存的连接",
+  "openDatabase": "打开数据库"
 }
