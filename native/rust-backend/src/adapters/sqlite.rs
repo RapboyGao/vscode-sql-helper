@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Map, Value};
 use sqlx::{sqlite::SqliteRow, Column, Row, SqlitePool};
 use tokio::{
@@ -254,6 +255,19 @@ fn to_sql_literal(value: &Value) -> String {
         }
         Value::Number(number) => number.to_string(),
         Value::String(text) => format!("'{}'", text.replace('\'', "''")),
+        Value::Object(object) => {
+            if let Some(base64_value) = object.get("__blobBase64").and_then(Value::as_str) {
+                match STANDARD.decode(base64_value) {
+                    Ok(bytes) => {
+                        let hex = bytes.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+                        format!("X'{hex}'")
+                    }
+                    Err(_) => "NULL".to_string(),
+                }
+            } else {
+                format!("'{}'", Value::Object(object.clone()).to_string().replace('\'', "''"))
+            }
+        }
         other => format!("'{}'", other.to_string().replace('\'', "''")),
     }
 }

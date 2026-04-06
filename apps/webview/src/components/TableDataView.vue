@@ -33,7 +33,13 @@ import DateTimeEditor from "./DateTimeEditor.vue";
 
 type RowDraftMap = Record<string, Record<string, unknown>>;
 type DeleteMap = Record<string, boolean>;
-type InputKind = "text" | "number" | "date" | "datetime-local" | "checkbox" | "textarea";
+type InputKind = "text" | "number" | "date" | "datetime-local" | "checkbox" | "textarea" | "blob";
+type BlobDraftValue = {
+  __blobBase64: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+};
 type TextEditorState = {
   source: "existing" | "insert";
   row?: Record<string, unknown>;
@@ -88,7 +94,7 @@ const selectedSchema = ref(props.selectedSchema ?? props.schemas[0] ?? "");
 const selectedTable = ref(props.selectedTable ?? props.tables[0] ?? "");
 const pageInput = ref(String((props.query.page ?? 0) + 1));
 const pageSize = ref(String(props.query.pageSize ?? 50));
-const insertDraft = ref<Record<string, string>>({});
+const insertDraft = ref<Record<string, unknown>>({});
 const rowDrafts = ref<RowDraftMap>({});
 const pendingDeletes = ref<DeleteMap>({});
 const pendingInserts = ref<PendingTableInsert[]>([]);
@@ -265,6 +271,10 @@ const rowsForDisplay = computed(() => {
 
 const hasInsertDraftValues = computed(() =>
   Object.values(insertDraft.value).some((value) => {
+    if (isBlobDraftValue(value)) {
+      return true;
+    }
+
     if (typeof value === "boolean") {
       return value;
     }
@@ -331,6 +341,10 @@ function columnInputKind(columnName: string): InputKind {
   const column = columnSchema(columnName);
   const normalized = column?.dataType.toLowerCase() ?? "";
 
+  if (/(blob|binary|bytea)/.test(normalized)) {
+    return "blob";
+  }
+
   if (/(bool|bit)/.test(normalized)) {
     return "checkbox";
   }
@@ -383,6 +397,10 @@ function normalizeCellValue(columnName: string, value: unknown): string | boolea
     return formatDateTimeValue(value);
   }
 
+  if (kind === "blob") {
+    return formatBlobValue(value);
+  }
+
   return String(value ?? "");
 }
 
@@ -403,6 +421,57 @@ function formatDateTimeValue(value: unknown): string {
 
   const normalized = text.replace(" ", "T").replace(/Z$/, "");
   return normalized.length >= 23 ? normalized.slice(0, 23) : normalized;
+}
+
+function isBlobDraftValue(value: unknown): value is BlobDraftValue {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "__blobBase64" in (value as Record<string, unknown>) &&
+      typeof (value as Record<string, unknown>).__blobBase64 === "string"
+  );
+}
+
+function formatBlobValue(value: unknown): string {
+  if (isBlobDraftValue(value)) {
+    return `${value.fileName} (${formatBytes(value.fileSize)})`;
+  }
+
+  if (value == null) {
+    return "";
+  }
+
+  if (Array.isArray(value)) {
+    return `Binary data (${value.length} items)`;
+  }
+
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+
+  if (text.startsWith("[") && text.endsWith("]")) {
+    const itemCount = text === "[]" ? 0 : text.split(",").length;
+    return `Binary data (${itemCount} bytes)`;
+  }
+
+  if (text.length > 48) {
+    return "Binary data";
+  }
+
+  return text;
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+
+  if (size < 1024 * 1024) {
+    return `${(size / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function cellDisplayValue(row: Record<string, unknown>, columnName: string): string | boolean {
@@ -449,11 +518,64 @@ function handleInsertDraftInput(columnName: string, event: Event): void {
   };
 }
 
-function setInsertDraftValue(columnName: string, value: string): void {
+function setInsertDraftValue(columnName: string, value: unknown): void {
   insertDraft.value = {
     ...insertDraft.value,
     [columnName]: value
   };
+}
+
+async function pickBlobFile(): Promise<BlobDraftValue | null> {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "*/*";
+
+  const file = await new Promise<File | null>((resolve) => {
+    input.addEventListener(
+      "change",
+      () => {
+        resolve(input.files?.[0] ?? null);
+      },
+      { once: true }
+    );
+    input.click();
+  });
+
+  if (!file) {
+    return null;
+  }
+
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return {
+    __blobBase64: btoa(binary),
+    fileName: file.name,
+    fileSize: file.size,
+    mimeType: file.type || "application/octet-stream"
+  };
+}
+
+async function pickBlobForRow(row: Record<string, unknown>, columnName: string): Promise<void> {
+  const blobValue = await pickBlobFile();
+  if (!blobValue) {
+    return;
+  }
+
+  setDraftValue(row, columnName, blobValue);
+}
+
+async function pickBlobForInsert(columnName: string): Promise<void> {
+  const blobValue = await pickBlobFile();
+  if (!blobValue) {
+    return;
+  }
+
+  setInsertDraftValue(columnName, blobValue);
 }
 
 function createDraftId(prefix: string): string {
@@ -904,6 +1026,13 @@ function buildInsertRow(): Record<string, unknown> {
     const raw = insertDraft.value[column.name];
     const kind = columnInputKind(column.name);
 
+    if (kind === "blob") {
+      if (isBlobDraftValue(raw)) {
+        row[column.name] = raw;
+      }
+      return row;
+    }
+
     if (kind === "checkbox") {
       if (raw === "true") {
         row[column.name] = true;
@@ -955,6 +1084,11 @@ function applyTextEditor(): void {
 function textButtonLabel(row: Record<string, unknown>, columnName: string): string {
   const value = String(cellDisplayValue(row, columnName)).trim();
   return value || "Edit text";
+}
+
+function blobButtonLabel(value: unknown): string {
+  const display = formatBlobValue(value).trim();
+  return display || "Choose file";
 }
 
 function openInsertTextEditor(columnName: string): void {
@@ -1311,6 +1445,22 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       placeholder="Set datetime"
                       @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
                     />
+                    <button
+                      v-else-if="columnInputKind(column.name) === 'blob'"
+                      type="button"
+                      class="text-link-button"
+                      :class="{
+                        'changed-input': entry.kind === 'insert'
+                          ? entry.row[column.name] !== undefined
+                          : cellChanged(entry.row, column.name),
+                        'deleted-input': entry.kind === 'existing' && pendingDeletes[entry.id],
+                        'readonly-input': !isEditableColumn(column.name)
+                      }"
+                      :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
+                      @click="entry.kind === 'existing' && isEditableColumn(column.name) && pickBlobForRow(entry.row, column.name)"
+                    >
+                      {{ blobButtonLabel(draftValue(entry.row, column.name)) }}
+                    </button>
                     <input
                       v-else-if="columnInputKind(column.name) !== 'textarea' && columnInputKind(column.name) !== 'checkbox'"
                       :type="columnInputKind(column.name)"
@@ -1422,13 +1572,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                         :class="pendingCellClass(change, column.name)"
                       >
                         <template v-if="change.kind === 'insert'">
-                          {{ change.row[column.name] ?? "" }}
+                          {{ formatBlobValue(change.row[column.name] ?? "") }}
                         </template>
                         <template v-else-if="change.kind === 'delete'">
-                          {{ change.row[column.name] ?? "" }}
+                          {{ formatBlobValue(change.row[column.name] ?? "") }}
                         </template>
                         <template v-else>
-                          {{ change.values[column.name] ?? change.originalRow[column.name] ?? "" }}
+                          {{ formatBlobValue(change.values[column.name] ?? change.originalRow[column.name] ?? "") }}
                         </template>
                       </td>
                     </tr>
@@ -1492,6 +1642,16 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 placeholder="Set datetime"
                 @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
               />
+                    <button
+                      v-else-if="columnInputKind(column.name) === 'blob'"
+                      type="button"
+                      class="text-link-button"
+                      :disabled="!isEditableColumn(column.name)"
+                      :class="{ 'readonly-input': !isEditableColumn(column.name) }"
+                      @click="isEditableColumn(column.name) && pickBlobForInsert(column.name)"
+                    >
+                      {{ blobButtonLabel(insertDraft[column.name]) }}
+                    </button>
                     <input
                       v-else-if="columnInputKind(column.name) === 'checkbox'"
                       type="checkbox"
