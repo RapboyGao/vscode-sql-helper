@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { getLocale, t } from "../composables/i18n";
 
 type DateTimeParts = {
   date: string;
@@ -17,8 +18,6 @@ type CalendarCell = {
   isToday: boolean;
   isSelected: boolean;
 };
-
-const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const props = defineProps<{
   modelValue: string;
@@ -44,10 +43,19 @@ watch(
   }
 );
 
-const summary = computed(() => props.modelValue || props.placeholder || "Set datetime");
+const summary = computed(() => props.modelValue || props.placeholder || t("setDatetime"));
+const weekdayLabels = computed(() => [
+  t("weekdaySun"),
+  t("weekdayMon"),
+  t("weekdayTue"),
+  t("weekdayWed"),
+  t("weekdayThu"),
+  t("weekdayFri"),
+  t("weekdaySat")
+]);
 
 const calendarTitle = computed(() =>
-  calendarMonth.value.toLocaleDateString("en-US", {
+  calendarMonth.value.toLocaleDateString(getLocale(), {
     year: "numeric",
     month: "long"
   })
@@ -227,23 +235,23 @@ function cancel(): void {
     <div v-if="open" class="datetime-backdrop" @click.self="closeEditor">
       <div class="datetime-modal">
         <div class="datetime-topbar">
-          <button type="button" class="secondary" @click="closeEditor">Done</button>
+          <button type="button" class="secondary" @click="closeEditor">{{ t("done") }}</button>
         </div>
 
         <div class="datetime-layout">
           <section class="calendar-panel">
             <div class="calendar-header">
-              <button type="button" class="secondary icon-button" aria-label="Previous month" @click="shiftMonth(-1)">
+              <button type="button" class="secondary icon-button" :aria-label="t('previousMonth')" @click="shiftMonth(-1)">
                 ‹
               </button>
               <strong>{{ calendarTitle }}</strong>
-              <button type="button" class="secondary icon-button" aria-label="Next month" @click="shiftMonth(1)">
+              <button type="button" class="secondary icon-button" :aria-label="t('nextMonth')" @click="shiftMonth(1)">
                 ›
               </button>
             </div>
 
             <div class="calendar-grid weekday-row">
-              <span v-for="weekday in WEEKDAY_LABELS" :key="weekday">{{ weekday }}</span>
+              <span v-for="weekday in weekdayLabels" :key="weekday">{{ weekday }}</span>
             </div>
 
             <div class="calendar-grid day-grid">
@@ -266,7 +274,7 @@ function cancel(): void {
 
           <section class="time-panel">
             <label class="datetime-field">
-              <span>Date</span>
+              <span>{{ t("date") }}</span>
               <input
                 :value="draft.date"
                 type="text"
@@ -277,7 +285,7 @@ function cancel(): void {
 
             <div class="datetime-grid">
               <label class="datetime-field">
-                <span>Hour</span>
+                <span>{{ t("hour") }}</span>
                 <input
                   :value="draft.hour"
                   type="number"
@@ -288,7 +296,7 @@ function cancel(): void {
                 />
               </label>
               <label class="datetime-field">
-                <span>Minute</span>
+                <span>{{ t("minute") }}</span>
                 <input
                   :value="draft.minute"
                   type="number"
@@ -299,7 +307,7 @@ function cancel(): void {
                 />
               </label>
               <label class="datetime-field">
-                <span>Second</span>
+                <span>{{ t("second") }}</span>
                 <input
                   :value="draft.second"
                   type="number"
@@ -310,7 +318,7 @@ function cancel(): void {
                 />
               </label>
               <label class="datetime-field">
-                <span>Millisecond</span>
+                <span>{{ t("millisecond") }}</span>
                 <input
                   :value="draft.millisecond"
                   type="number"
@@ -325,8 +333,8 @@ function cancel(): void {
         </div>
 
         <div class="datetime-actions">
-          <button class="secondary" type="button" @click="clear">Clear</button>
-          <button class="secondary" type="button" @click="cancel">Cancel</button>
+          <button class="secondary" type="button" @click="clear">{{ t("clear") }}</button>
+          <button class="secondary" type="button" @click="cancel">{{ t("cancel") }}</button>
         </div>
       </div>
     </div>

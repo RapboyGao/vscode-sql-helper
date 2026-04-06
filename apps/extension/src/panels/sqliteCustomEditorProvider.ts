@@ -36,7 +36,8 @@ export class SqliteCustomEditorProvider implements vscode.CustomReadonlyEditorPr
     webviewPanel.webview.html = await renderWebviewHtml(
       webviewPanel.webview,
       this.context.extensionUri,
-      webviewPanel.title
+      webviewPanel.title,
+      vscode.env.language
     );
 
     void addSqliteFileConnection(

@@ -48,7 +48,7 @@ export class ConnectionDetailsPanel {
 
     this.currentConnectionId = connection.id;
     this.panel.title = l10n.t(`Connection: ${connection.name}`);
-    this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, connection.name);
+    this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, connection.name, vscode.env.language);
     await this.postBootstrap(connection.id);
     this.panel.reveal(vscode.ViewColumn.Active);
   }

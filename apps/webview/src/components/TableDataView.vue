@@ -28,6 +28,7 @@ import type {
   TableQueryResult,
   TableSchema
 } from "@usd/shared";
+import { t } from "../composables/i18n";
 import MdiIcon from "./MdiIcon.vue";
 import DateTimeEditor from "./DateTimeEditor.vue";
 
@@ -1263,7 +1264,7 @@ function pendingCellClass(change: PendingTableChange, column: string): Record<st
 
 function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"): string {
   if (entryKind === "insert") {
-    return "New";
+    return t("rowNew");
   }
 
   return String(pageOffset.value + (entryIndex - pendingInserts.value.length) + 1);
@@ -1275,7 +1276,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
   <section class="db-layout">
     <aside class="db-sidebar card">
       <div class="db-sidebar-header">
-        <p class="eyebrow">Connection</p>
+        <p class="eyebrow">{{ t("connection") }}</p>
         <h1 class="title-with-icon">
           <MdiIcon :path="mdiDatabaseOutline" :size="20" />
           <span>{{ connection.name }}</span>
@@ -1283,7 +1284,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
       </div>
 
       <label>
-        <span>Database / Schema</span>
+        <span>{{ t("databaseSchema") }}</span>
         <select v-model="selectedSchema" @change="handleSchemaChange">
           <option v-for="schema in schemas" :key="schema" :value="schema">{{ schema }}</option>
         </select>
@@ -1291,13 +1292,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
 
       <div class="table-menu">
         <div class="subheader">
-          <h2>Tables</h2>
+          <h2>{{ t("tables") }}</h2>
           <div class="actions">
             <span class="badge">{{ tables.length }}</span>
             <button
               class="secondary icon-button"
-              title="New Table"
-              aria-label="New Table"
+              :title="t('newTable')"
+              :aria-label="t('newTable')"
               :disabled="isReadonlyConnection"
               @click="openTableModal('create')"
             >
@@ -1322,40 +1323,40 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
       <header class="panel-shell">
         <div class="panel-header compact">
           <div>
-            <p class="eyebrow">Table Workspace</p>
+            <p class="eyebrow">{{ t("tableWorkspace") }}</p>
             <h1 class="title-with-icon">
               <MdiIcon :path="mdiTableEdit" :size="20" />
-              <span>{{ selectedTable || "Choose a table" }}</span>
+              <span>{{ selectedTable || t("chooseTable") }}</span>
             </h1>
           </div>
           <div class="actions" v-if="selectedSchema">
             <button class="secondary action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="openTableModal('rename')">
               <MdiIcon :path="mdiTableEdit" />
-              <span>Rename</span>
+              <span>{{ t("rename") }}</span>
             </button>
             <button class="danger action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="openTableModal('delete')">
               <MdiIcon :path="mdiDeleteOutline" />
-              <span>Delete</span>
+              <span>{{ t("delete") }}</span>
             </button>
             <button class="secondary action-button" :disabled="!hasSelectedTable" @click="activeTab = 'columns'">
               <MdiIcon :path="mdiTableColumn" />
-              <span>Open Columns</span>
+              <span>{{ t("openColumns") }}</span>
             </button>
           </div>
         </div>
 
         <nav class="tabs">
-          <button :class="{ active: activeTab === 'columns' }" title="Columns" aria-label="Columns" @click="activeTab = 'columns'">
+          <button :class="{ active: activeTab === 'columns' }" :title="t('columns')" :aria-label="t('columns')" @click="activeTab = 'columns'">
             <MdiIcon :path="mdiTableColumn" />
           </button>
-          <button :class="{ active: activeTab === 'data' }" title="Data" aria-label="Data" @click="activeTab = 'data'">
+          <button :class="{ active: activeTab === 'data' }" :title="t('data')" :aria-label="t('data')" @click="activeTab = 'data'">
             <MdiIcon :path="mdiFileTableOutline" />
           </button>
           <button :class="{ active: activeTab === 'pending' }" @click="activeTab = 'pending'">
             <MdiIcon :path="mdiFormatListBulletedSquare" />
             <span class="badge">{{ pendingChanges.length }}</span>
           </button>
-          <button :class="{ active: activeTab === 'logs' }" title="Logs" aria-label="Logs" @click="activeTab = 'logs'">
+          <button :class="{ active: activeTab === 'logs' }" :title="t('logs')" :aria-label="t('logs')" @click="activeTab = 'logs'">
             <MdiIcon :path="mdiTextBoxSearchOutline" />
           </button>
         </nav>
@@ -1366,13 +1367,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
           <div class="data-tools">
             <div class="search-toolbar">
               <select v-model="selectedSearchColumn">
-                <option value="__all__">All</option>
+                <option value="__all__">{{ t("all") }}</option>
                 <option v-for="column in searchableColumns" :key="column.name" :value="column.name">
                   {{ column.name }}
                 </option>
               </select>
-              <input v-model="keyword" placeholder="Search keyword" @keydown.enter="emitQuery(0)" />
-              <button class="icon-button" title="Run Query" aria-label="Run Query" @click="emitQuery(0)">
+              <input v-model="keyword" :placeholder="t('searchKeyword')" @keydown.enter="emitQuery(0)" />
+              <button class="icon-button" :title="t('runQuery')" :aria-label="t('runQuery')" @click="emitQuery(0)">
                 <MdiIcon :path="mdiMagnify" />
               </button>
             </div>
@@ -1381,20 +1382,20 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
           <div class="subheader">
             <div class="rows-meta">
               <select v-model="pageSize" @change="emitQuery(0)">
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-                <option value="200">200 rows</option>
+                <option value="25">{{ t("rows25") }}</option>
+                <option value="50">{{ t("rows50") }}</option>
+                <option value="100">{{ t("rows100") }}</option>
+                <option value="200">{{ t("rows200") }}</option>
               </select>
               <div class="pagination">
-                <button class="secondary icon-button" title="Previous Page" aria-label="Previous Page" :disabled="currentPage <= 1" @click="emitQuery(currentPage - 2)">
+                <button class="secondary icon-button" :title="t('previousPage')" :aria-label="t('previousPage')" :disabled="currentPage <= 1" @click="emitQuery(currentPage - 2)">
                   <MdiIcon :path="mdiChevronLeft" />
                 </button>
                 <div class="page-input">
                   <input v-model="pageInput" @keydown.enter="goToPage" />
                 </div>
                 <span class="page-total">/ {{ totalPages }}</span>
-                <button class="secondary icon-button" title="Next Page" aria-label="Next Page" :disabled="currentPage >= totalPages" @click="emitQuery(currentPage)">
+                <button class="secondary icon-button" :title="t('nextPage')" :aria-label="t('nextPage')" :disabled="currentPage >= totalPages" @click="emitQuery(currentPage)">
                   <MdiIcon :path="mdiChevronRight" />
                 </button>
               </div>
@@ -1413,7 +1414,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   >
                     {{ column.name }}
                   </th>
-                  <th>Actions</th>
+                  <th>{{ t("actions") }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1442,7 +1443,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       :model-value="String(cellDisplayValue(entry.row, column.name))"
                       :on-commit="(value) => entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, value)"
                       :disabled="entry.kind === 'insert' || Boolean(pendingDeletes[entry.id]) || !isEditableColumn(column.name)"
-                      placeholder="Set datetime"
+                      :placeholder="t('setDatetime')"
                       @update:modelValue="entry.kind === 'existing' && isEditableColumn(column.name) && setDraftValue(entry.row, column.name, $event)"
                     />
                     <button
@@ -1508,7 +1509,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                     </button>
                   </td>
                   <td class="row-actions">
-                    <button class="danger icon-button" title="Delete" aria-label="Delete" @click="entry.kind === 'insert'
+                    <button class="danger icon-button" :title="t('delete')" :aria-label="t('delete')" @click="entry.kind === 'insert'
                       ? cancelPendingChange({ kind: 'insert', tempId: entry.id, row: entry.row })
                       : stageDelete(entry.row)">
                       <MdiIcon :path="mdiDeleteOutline" />
@@ -1517,7 +1518,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 </tr>
               </tbody>
             </table>
-            <p v-else class="empty-state">Select a table from the left menu to load data.</p>
+            <p v-else class="empty-state">{{ t("selectTableToLoad") }}</p>
           </div>
         </div>
       </section>
@@ -1525,15 +1526,15 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
       <section v-else-if="activeTab === 'pending'" class="surface-stack">
         <div class="card">
           <div class="subheader">
-            <h2>Pending Changes</h2>
+            <h2>{{ t("pendingChanges") }}</h2>
             <div class="actions">
-              <button class="secondary icon-button" title="Restore All" aria-label="Restore All" @click="clearAllPending">
+              <button class="secondary icon-button" :title="t('restoreAll')" :aria-label="t('restoreAll')" @click="clearAllPending">
                 <MdiIcon :path="mdiRestore" />
               </button>
               <button
                 class="icon-button"
-                :title="applyingPending ? 'Applying Changes' : 'Apply All'"
-                :aria-label="applyingPending ? 'Applying Changes' : 'Apply All'"
+                :title="applyingPending ? t('applyingChanges') : t('applyAll')"
+                :aria-label="applyingPending ? t('applyingChanges') : t('applyAll')"
                 :disabled="!pendingChanges.length || applyingPending"
                 @click="applyAllPending"
               >
@@ -1552,7 +1553,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   </strong>
                   <span class="badge">{{ selectedTable }}</span>
                   </div>
-                <button class="secondary icon-button" title="Cancel Pending Change" aria-label="Cancel Pending Change" @click="cancelPendingChange(change)">
+                <button class="secondary icon-button" :title="t('cancelPendingChange')" :aria-label="t('cancelPendingChange')" @click="cancelPendingChange(change)">
                   <MdiIcon :path="mdiRestore" />
                 </button>
                 </div>
@@ -1587,21 +1588,21 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               </div>
             </div>
           </div>
-          <p v-else class="empty-state">No pending inserts, updates, or deletes.</p>
+          <p v-else class="empty-state">{{ t("noPendingRows") }}</p>
         </div>
 
         <div class="card">
           <div class="subheader">
-            <h2>Stage New Row</h2>
+            <h2>{{ t("stageNewRow") }}</h2>
             <button
               class="action-button"
-              title="Add To Pending"
-              aria-label="Add To Pending"
+              :title="t('addToPending')"
+              :aria-label="t('addToPending')"
               :disabled="!hasInsertDraftValues"
               @click="stageInsert"
             >
               <MdiIcon :path="mdiPlusCircleOutline" />
-              <span>Stage Row</span>
+              <span>{{ t("stageRow") }}</span>
             </button>
           </div>
           <div class="data-grid">
@@ -1620,7 +1621,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               </thead>
               <tbody>
                 <tr>
-                  <td class="index-column">New</td>
+                  <td class="index-column">{{ t("rowNew") }}</td>
                   <td
                     v-for="column in visibleColumns"
                     :key="column.name"
@@ -1639,7 +1640,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                 :model-value="String(insertDraft[column.name] ?? '')"
                 :on-commit="(value) => isEditableColumn(column.name) && setInsertDraftValue(column.name, value)"
                 :disabled="!isEditableColumn(column.name)"
-                placeholder="Set datetime"
+                :placeholder="t('setDatetime')"
                 @update:modelValue="isEditableColumn(column.name) && setInsertDraftValue(column.name, $event)"
               />
                     <button
@@ -1668,7 +1669,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                       :class="{ 'readonly-input': !isEditableColumn(column.name) }"
                       @click="isEditableColumn(column.name) && openInsertTextEditor(column.name)"
                     >
-                      {{ String(insertDraft[column.name] ?? '').trim() || "Edit text" }}
+                      {{ String(insertDraft[column.name] ?? '').trim() || t("editText") }}
                     </button>
                   </td>
                 </tr>
@@ -1681,37 +1682,37 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
       <section v-else-if="activeTab === 'columns'" class="surface-stack">
         <div class="card">
           <div class="subheader">
-            <h2>Columns</h2>
+            <h2>{{ t("columns") }}</h2>
             <div class="actions">
               <button class="secondary action-button" :disabled="isReadonlyConnection || !hasSelectedTable" @click="addColumnDraft">
                 <MdiIcon :path="mdiPlusCircleOutline" />
-                <span>Add Column</span>
+                <span>{{ t("addColumn") }}</span>
               </button>
               <button class="secondary action-button" :disabled="!hasColumnDraftChanges" @click="previewColumnActions">
                 <MdiIcon :path="mdiMagnify" />
-                <span>Preview</span>
+                <span>{{ t("preview") }}</span>
               </button>
               <button class="action-button" :disabled="isReadonlyConnection || !hasColumnDraftChanges" @click="applyColumnActions">
                 <MdiIcon :path="mdiPlayCircleOutline" />
-                <span>Apply</span>
+                <span>{{ t("apply") }}</span>
               </button>
               <button class="secondary action-button" :disabled="!hasColumnDraftChanges" @click="resetColumns">
                 <MdiIcon :path="mdiRestore" />
-                <span>Reset</span>
+                <span>{{ t("reset") }}</span>
               </button>
             </div>
           </div>
           <table v-if="effectiveStructureColumns.length">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Nullable</th>
-                <th>Default</th>
-                <th>PK</th>
-                <th>Unique</th>
-                <th>Auto Increment</th>
-                <th>Actions</th>
+                <th>{{ t("name") }}</th>
+                <th>{{ t("type") }}</th>
+                <th>{{ t("nullable") }}</th>
+                <th>{{ t("default") }}</th>
+                <th>{{ t("pk") }}</th>
+                <th>{{ t("unique") }}</th>
+                <th>{{ t("autoIncrement") }}</th>
+                <th>{{ t("actions") }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1751,14 +1752,14 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                     @input="updateColumnDraft(column.id, { defaultValue: ($event.target as HTMLInputElement).value })"
                   />
                 </td>
-                <td>{{ column.primaryKey ? "YES" : "NO" }}</td>
-                <td>{{ column.unique ? "YES" : "NO" }}</td>
-                <td>{{ column.autoIncrement ? "YES" : "NO" }}</td>
+                <td>{{ column.primaryKey ? t("yes") : t("no") }}</td>
+                <td>{{ column.unique ? t("yes") : t("no") }}</td>
+                <td>{{ column.autoIncrement ? t("yes") : t("no") }}</td>
                 <td class="row-actions">
                   <button
                     class="danger icon-button"
-                    title="Delete Column"
-                    aria-label="Delete Column"
+                    :title="t('delete')"
+                    :aria-label="t('delete')"
                     :disabled="!canDeleteColumn(column)"
                     @click="toggleColumnDelete(column.id)"
                   >
@@ -1768,14 +1769,14 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
               </tr>
             </tbody>
           </table>
-          <p v-else class="empty-state">Choose a table to inspect and manage its columns.</p>
+          <p v-else class="empty-state">{{ t("chooseTableToInspectColumns") }}</p>
         </div>
 
       </section>
 
       <section v-else class="card">
         <div class="subheader">
-          <h2>Operation Logs</h2>
+          <h2>{{ t("operationLogs") }}</h2>
           <span class="badge">{{ logs.length }}</span>
         </div>
         <ul v-if="logs.length" class="log-list">
@@ -1786,10 +1787,10 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
             </strong>
             <span>{{ log.objectName }}</span>
             <em>{{ new Date(log.timestamp).toLocaleString() }}</em>
-            <b :class="log.success ? 'ok' : 'bad'">{{ log.success ? "Success" : "Failed" }}</b>
+            <b :class="log.success ? 'ok' : 'bad'">{{ log.success ? t("success") : t("failed") }}</b>
           </li>
         </ul>
-        <p v-else class="empty-state">No operations yet.</p>
+        <p v-else class="empty-state">{{ t("noOperationsYet") }}</p>
       </section>
 
       <div v-if="textEditor" class="modal-backdrop" @click.self="closeTextEditor">
@@ -1797,8 +1798,8 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
           <div class="subheader">
             <h2>{{ textEditor.columnName }}</h2>
             <div class="actions">
-              <button class="secondary" type="button" @click="closeTextEditor">Cancel</button>
-              <button type="button" @click="applyTextEditor">Apply</button>
+              <button class="secondary" type="button" @click="closeTextEditor">{{ t("cancel") }}</button>
+              <button type="button" @click="applyTextEditor">{{ t("apply") }}</button>
             </div>
           </div>
           <textarea v-model="textEditor.value" rows="12" class="modal-textarea" />
@@ -1811,41 +1812,41 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
             <h2>
               {{
                 tableActionModal === 'create'
-                  ? 'Create Table'
+                  ? t('createTable')
                   : tableActionModal === 'rename'
-                    ? 'Rename Table'
-                    : 'Delete Table'
+                    ? t('renameTable')
+                    : t('deleteTable')
               }}
             </h2>
             <div class="actions">
-              <button class="secondary" type="button" @click="closeTableModal">Cancel</button>
-              <button class="secondary" type="button" @click="previewCurrentTableAction">Preview SQL</button>
+              <button class="secondary" type="button" @click="closeTableModal">{{ t("cancel") }}</button>
+              <button class="secondary" type="button" @click="previewCurrentTableAction">{{ t("previewSql") }}</button>
               <button type="button" @click="applyCurrentTableAction">
-                {{ tableActionModal === 'delete' ? 'Delete' : tableActionModal === 'create' ? 'Create' : 'Rename' }}
+                {{ tableActionModal === 'delete' ? t('delete') : tableActionModal === 'create' ? t('createTable') : t('rename') }}
               </button>
             </div>
           </div>
 
           <div v-if="tableActionModal === 'create'" class="surface-stack">
             <label>
-              <span>Table Name</span>
-              <input v-model="tableNameDraft" placeholder="users" />
+              <span>{{ t("tableName") }}</span>
+              <input v-model="tableNameDraft" :placeholder="t('usersExample')" />
             </label>
             <div class="subheader">
-              <h2>Columns</h2>
+              <h2>{{ t("columns") }}</h2>
               <button class="secondary action-button" type="button" @click="addCreateTableColumn">
                 <MdiIcon :path="mdiPlusCircleOutline" />
-                <span>Add Column</span>
+                <span>{{ t("addColumnLabel") }}</span>
               </button>
             </div>
             <div class="modal-grid" v-for="column in createTableColumns" :key="column.id">
-              <input :value="column.name" placeholder="Column name" @input="updateCreateTableColumn(column.id, { name: ($event.target as HTMLInputElement).value })" />
+              <input :value="column.name" :placeholder="t('columnName')" @input="updateCreateTableColumn(column.id, { name: ($event.target as HTMLInputElement).value })" />
               <select :value="column.dataType" @change="updateCreateTableColumn(column.id, { dataType: ($event.target as HTMLSelectElement).value })">
                 <option v-for="option in tableTypeOptions" :key="option" :value="option">{{ option }}</option>
               </select>
               <input
                 :value="column.defaultValue"
-                placeholder="Default value"
+                :placeholder="t('defaultValue')"
                 :disabled="!createColumnSupportsDefault(column)"
                 @input="updateCreateTableColumn(column.id, { defaultValue: ($event.target as HTMLInputElement).value })"
               />
@@ -1856,7 +1857,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   :disabled="column.primaryKey || column.autoIncrement"
                   @change="updateCreateTableColumn(column.id, { nullable: ($event.target as HTMLInputElement).checked })"
                 />
-                Nullable
+                {{ t("nullable") }}
               </label>
               <label class="inline-check">
                 <input
@@ -1864,7 +1865,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   :checked="column.primaryKey"
                   @change="updateCreateTableColumn(column.id, { primaryKey: ($event.target as HTMLInputElement).checked })"
                 />
-                PK
+                {{ t("pk") }}
               </label>
               <label class="inline-check">
                 <input
@@ -1873,7 +1874,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   :disabled="column.autoIncrement"
                   @change="updateCreateTableColumn(column.id, { unique: ($event.target as HTMLInputElement).checked })"
                 />
-                Unique
+                {{ t("unique") }}
               </label>
               <label class="inline-check">
                 <input
@@ -1882,7 +1883,7 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
                   :disabled="!createColumnSupportsAutoIncrement(column)"
                   @change="updateCreateTableColumn(column.id, { autoIncrement: ($event.target as HTMLInputElement).checked })"
                 />
-                Auto
+                {{ t("autoIncrement") }}
               </label>
               <button class="danger icon-button" type="button" :disabled="createTableColumns.length <= 1" @click="removeCreateTableColumn(column.id)">
                 <MdiIcon :path="mdiDeleteOutline" />
@@ -1892,13 +1893,13 @@ function displayRowNumber(entryIndex: number, entryKind: "insert" | "existing"):
 
           <div v-else-if="tableActionModal === 'rename'" class="surface-stack">
             <label>
-              <span>New Table Name</span>
+              <span>{{ t("newTableName") }}</span>
               <input v-model="tableNameDraft" />
             </label>
           </div>
 
           <div v-else class="surface-stack">
-            <p>Type <strong>{{ selectedTable }}</strong> to confirm table deletion.</p>
+            <p>{{ t("deleteTableConfirm", { table: selectedTable ?? "" }) }}</p>
             <input v-model="deleteConfirmationDraft" :placeholder="selectedTable" />
           </div>
         </div>

@@ -13,6 +13,7 @@ import type {
 } from "@usd/shared";
 import ConnectionDetailsView from "./components/ConnectionDetailsView.vue";
 import TableDataView from "./components/TableDataView.vue";
+import { actionLabel, setLocale, t } from "./composables/i18n";
 import { getVsCodeApi } from "./composables/vscode";
 
 const vscode = getVsCodeApi();
@@ -33,7 +34,7 @@ const message = ref<string>("");
 const isError = ref(false);
 const applySignal = ref(0);
 const connectionBusyAction = ref<"save" | "test" | null>(null);
-const connectionStatusText = ref("Ready");
+const connectionStatusText = ref(t("ready"));
 const pendingSchemaAction = ref<string | null>(null);
 let connectionBusyTimer: number | undefined;
 let schemaBusyTimer: number | undefined;
@@ -79,13 +80,13 @@ function startConnectionBusy(action: "save" | "test", statusText: string): void 
     }
 
     clearConnectionBusy();
-    connectionStatusText.value = "No response";
-    showNotice(`Connection ${action} did not finish. Please try again.`, true);
+    connectionStatusText.value = t("noResponse");
+    showNotice(t("connectionDidNotFinish", { action: t(action === "save" ? "actionSave" : "actionTest") }), true);
   }, 8000);
 }
 
 function requestConnectionSave(nextForm: ConnectionFormState): void {
-  startConnectionBusy("save", "Saving connection...");
+  startConnectionBusy("save", t("savingConnection"));
   post({
     type: "connection/save",
     payload: toPlainConnectionForm(nextForm)
@@ -93,7 +94,7 @@ function requestConnectionSave(nextForm: ConnectionFormState): void {
 }
 
 function requestConnectionTest(nextForm: ConnectionFormState): void {
-  startConnectionBusy("test", "Testing connection...");
+  startConnectionBusy("test", t("testingConnection"));
   post({
     type: "connection/test",
     payload: toPlainConnectionForm(nextForm)
@@ -123,14 +124,14 @@ function requestSchemaApply(payload: {
 }): void {
   clearSchemaBusy();
   pendingSchemaAction.value = payload.action;
-  showNotice(`Applying ${payload.action}...`);
+  showNotice(t("schemaApplying", { action: actionLabel(payload.action) }));
   schemaBusyTimer = window.setTimeout(() => {
     if (pendingSchemaAction.value !== payload.action) {
       return;
     }
 
     clearSchemaBusy();
-    showNotice(`${payload.action} did not finish. Please try again.`, true);
+    showNotice(t("schemaDidNotFinish", { action: actionLabel(payload.action) }), true);
   }, 8000);
   post({ type: "schema/apply", payload });
 }
@@ -181,6 +182,8 @@ function requestApplyChanges(payload: {
 }
 
 onMounted(() => {
+  setLocale(document.body.dataset.locale || navigator.language || "en");
+  connectionStatusText.value = t("ready");
   window.addEventListener("message", (event) => {
     const next = event.data as ExtensionToWebviewMessage;
     switch (next.type) {
@@ -190,18 +193,18 @@ onMounted(() => {
         form.value = next.payload.form;
         logs.value = next.payload.logs;
         clearConnectionBusy();
-        connectionStatusText.value = next.payload.connection.readonly ? "Readonly" : "Read / Write";
+        connectionStatusText.value = next.payload.connection.readonly ? t("readonly") : t("readWrite");
         break;
       case "connection/saved":
         connection.value = next.payload.connection;
         form.value = next.payload.form;
         clearConnectionBusy();
-        connectionStatusText.value = next.payload.connection.readonly ? "Readonly" : "Read / Write";
-        showNotice("Connection saved");
+        connectionStatusText.value = next.payload.connection.readonly ? t("readonly") : t("readWrite");
+        showNotice(t("connectionSaved"));
         break;
       case "connection/testResult":
         clearConnectionBusy();
-        connectionStatusText.value = next.payload.success ? "Connection verified" : "Connection failed";
+        connectionStatusText.value = next.payload.success ? t("connectionVerified") : t("connectionFailed");
         showNotice(next.payload.message, !next.payload.success);
         break;
       case "connection/filePicked":
@@ -211,7 +214,7 @@ onMounted(() => {
             filePath: next.payload.filePath
           };
         }
-        connectionStatusText.value = "File selected";
+        connectionStatusText.value = t("fileSelected");
         break;
       case "tableData/bootstrap":
         mode.value = "tableData";
@@ -227,7 +230,7 @@ onMounted(() => {
         if (pendingSchemaAction.value) {
           const action = pendingSchemaAction.value;
           clearSchemaBusy();
-          showNotice(`${action} applied`);
+          showNotice(t("schemaApplied", { action: actionLabel(action) }));
         }
         break;
       case "tableData/result":
@@ -240,9 +243,9 @@ onMounted(() => {
       case "tableData/appliedChanges":
         if (next.payload.appliedCount > 0) {
           applySignal.value += 1;
-          showNotice(`${next.payload.appliedCount} pending change(s) applied`);
+          showNotice(t("pendingApplied", { count: next.payload.appliedCount }));
         } else {
-          showNotice("No pending changes to apply.", true);
+          showNotice(t("noPendingChanges"), true);
         }
         break;
       case "schema/sqlPreview":
@@ -251,7 +254,7 @@ onMounted(() => {
       case "schema/applied": {
         const action = next.payload.action;
         clearSchemaBusy();
-        showNotice(`${action} applied on ${next.payload.table}`);
+        showNotice(t("schemaAppliedOnTable", { action: actionLabel(action), table: next.payload.table }));
         break;
       }
       case "logs/result":

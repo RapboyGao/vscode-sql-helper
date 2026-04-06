@@ -64,7 +64,7 @@ export class TableDataPanel {
     }
 
     this.panel.title = title ?? (table ? `${connection.name}: ${table}` : `${connection.name}: Data`);
-    this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, this.panel.title);
+    this.panel.webview.html = await renderWebviewHtml(this.panel.webview, this.context.extensionUri, this.panel.title, vscode.env.language);
     void this.postBootstrap();
     if (!targetPanel) {
       this.panel.reveal(vscode.ViewColumn.Active);
